@@ -157,9 +157,9 @@ $ nizm run
 | `--config <path>` | Explicit manifest paths (repeatable). Skips auto-discovery.             |
 | `--parallel`      | Run manifests concurrently. Hooks within each manifest stay sequential. |
 
-### `nizm install [--config <path>...] [--parallel]`
+### `nizm install [--config <path>...] [--parallel] [--force]`
 
-Writes a `pre-commit` hook into `.git/hooks/` that calls `nizm run` with baked-in config paths.
+Writes a `pre-commit` hook into `.git/hooks/` that calls `nizm run` with baked-in config paths. If a hook already exists, nizm appends its block — existing hooks are preserved.
 
 ```console
 $ nizm install --config pyproject.toml --config frontend/package.json
@@ -170,6 +170,7 @@ $ nizm install --config pyproject.toml --config frontend/package.json
 | :---------------- | :-------------------------------------------------------------- |
 | `--config <path>` | Bake specific manifests into the hook script (non-interactive). |
 | `--parallel`      | Bake `--parallel` flag into the hook script.                    |
+| `--force`         | Overwrite modified nizm blocks without prompting.               |
 
 > [!NOTE]
 > Without `--config`, nizm discovers manifests and shows an interactive picker.
@@ -198,6 +199,21 @@ nizm init ruff prettier
 
 > [!TIP]
 > For Rust projects, `rustfmt` and `clippy` are suggested automatically when a `[package]` section exists — no dev-dependency needed.
+
+### `nizm uninstall [--purge]`
+
+Removes nizm from the project. Deletes the nizm block from the pre-commit hook (preserving any foreign hooks in the same file). Optionally purges hook config from all manifests.
+
+```console
+$ nizm uninstall --purge
+  nizm block removed from pre-commit hook
+  cleaned pyproject.toml
+  cleaned package.json
+```
+
+| Flag      | Description                                                              |
+| :-------- | :----------------------------------------------------------------------- |
+| `--purge` | Also remove nizm hook config from manifests (interactive prompt if omitted). |
 
 ### `nizm doctor`
 
