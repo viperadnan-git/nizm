@@ -41,7 +41,7 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
             .default(true)
             .interact()?
         {
-            installer::install(repo_root)?;
+            installer::install(repo_root, false)?;
             println!();
             return doctor(repo_root);
         }
@@ -70,7 +70,7 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
             .default(true)
             .interact()?
         {
-            installer::install(repo_root)?;
+            installer::install(repo_root, false)?;
             println!();
             return doctor(repo_root);
         }
@@ -80,6 +80,7 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
     }
 
     println!("  {}:", style::bold("configs"));
+    let mut parsed_configs = Vec::new();
     for path in &configs {
         let full = repo_root.join(path);
         if !full.exists() {
@@ -101,9 +102,10 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
                 );
                 pass += 1;
             }
-            Ok(_) => {
+            Ok(cfg) => {
                 println!("    {} {}", style::green("ok "), path.display());
                 pass += 1;
+                parsed_configs.push(cfg);
             }
             Err(e) => {
                 println!(
@@ -117,19 +119,10 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
     }
 
     // Check 5: Hook commands resolvable
-    let mut hooks_checked = false;
-    for path in &configs {
-        let cfg = match config::parse_manifest(repo_root, path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        if cfg.hooks.is_empty() {
-            continue;
-        }
-        if !hooks_checked {
-            println!("  {}:", style::bold("commands"));
-            hooks_checked = true;
-        }
+    if !parsed_configs.is_empty() {
+        println!("  {}:", style::bold("commands"));
+    }
+    for cfg in &parsed_configs {
         for hook in &cfg.hooks {
             let exe = extract_executable(&hook.cmd);
             if command_exists(exe) {

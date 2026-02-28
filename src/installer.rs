@@ -7,7 +7,7 @@ use crate::{config, style};
 
 pub const HOOK_MARKER: &str = "# nizm-managed";
 
-pub fn install(repo_root: &Path) -> Result<()> {
+pub fn install(repo_root: &Path, parallel: bool) -> Result<()> {
     println!("scanning for manifests...");
     let manifests = config::discover_manifests(repo_root)?;
 
@@ -66,12 +66,12 @@ pub fn install(repo_root: &Path) -> Result<()> {
         }
     }
 
-    bake_hook(repo_root, &selected)?;
+    bake_hook(repo_root, &selected, parallel)?;
     println!("{}", style::green("pre-commit hook installed"));
     Ok(())
 }
 
-fn bake_hook(repo_root: &Path, manifests: &[&std::path::PathBuf]) -> Result<()> {
+fn bake_hook(repo_root: &Path, manifests: &[&std::path::PathBuf], parallel: bool) -> Result<()> {
     let hooks_dir = repo_root.join(".git/hooks");
     std::fs::create_dir_all(&hooks_dir)?;
 
@@ -80,6 +80,8 @@ fn bake_hook(repo_root: &Path, manifests: &[&std::path::PathBuf]) -> Result<()> 
         .map(|p| format!(" --config {}", p.display()))
         .collect();
 
+    let parallel_flag = if parallel { " --parallel" } else { "" };
+
     let script = format!(
         "#!/bin/sh\n\
          {HOOK_MARKER}\n\
@@ -87,7 +89,7 @@ fn bake_hook(repo_root: &Path, manifests: &[&std::path::PathBuf]) -> Result<()> 
          \x20 echo \"nizm: not found in PATH — install it or run: cargo install nizm\" >&2\n\
          \x20 exit 1\n\
          fi\n\
-         exec nizm run{config_args}\n"
+         exec nizm run{config_args}{parallel_flag}\n"
     );
 
     let hook_path = hooks_dir.join("pre-commit");
