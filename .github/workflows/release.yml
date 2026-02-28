@@ -68,19 +68,13 @@ jobs:
             tar czf "${DIR}.tar.gz" "$DIR"
           fi
 
-      - name: Copy binary to npm package
-        shell: bash
-        run: |
-          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "npm/${{ matrix.npm_pkg }}/${{ matrix.bin }}"
-          chmod +x "npm/${{ matrix.npm_pkg }}/${{ matrix.bin }}"
-
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.npm_pkg }}
           path: |
             nizm-*.tar.gz
             nizm-*.zip
-            npm/${{ matrix.npm_pkg }}/
+            target/${{ matrix.target }}/release/${{ matrix.bin }}
 
   release:
     needs: build
@@ -143,27 +137,15 @@ jobs:
         with:
           path: artifacts
 
-      - name: Sync version and copy binaries
+      - name: Copy binaries from artifacts
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
           for pkg in nizm-linux-x64 nizm-linux-arm64 nizm-darwin-x64 nizm-darwin-arm64 nizm-win32-x64; do
-            cp -r artifacts/${pkg}/npm/${pkg}/* npm/${pkg}/
-            chmod +x npm/${pkg}/nizm* 2>/dev/null || true
-            cd npm/${pkg}
-            npm version "$VERSION" --no-git-tag-version
-            cd ../..
+            mkdir -p npm/${pkg}
+            cp artifacts/${pkg}/target/*/release/nizm* npm/${pkg}/
           done
-          cd npm/nizm-cli
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
-            pkg.version = '$VERSION';
-            for (const k of Object.keys(pkg.optionalDependencies || {})) pkg.optionalDependencies[k] = '$VERSION';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 4) + '\n');
-          "
 
-      - name: Copy README to npm package
-        run: cp README.md npm/nizm-cli/
+      - name: Generate npm packages
+        run: node scripts/generate-npm.mjs --version ${GITHUB_REF_NAME#v}
 
       - name: Publish platform packages
         run: |
