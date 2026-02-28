@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use dialoguer::{Confirm, MultiSelect};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -227,9 +228,12 @@ fn replace_block(content: &str, new_block: &str) -> Result<String> {
 
 fn write_hook(hook_path: &Path, content: &str) -> Result<()> {
     std::fs::write(hook_path, content).context("failed to write pre-commit hook")?;
-    let mut perms = std::fs::metadata(hook_path)?.permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(hook_path, perms)?;
+    #[cfg(unix)]
+    {
+        let mut perms = std::fs::metadata(hook_path)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(hook_path, perms)?;
+    }
     Ok(())
 }
 
