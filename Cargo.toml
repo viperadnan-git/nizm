@@ -1,8 +1,13 @@
 [package]
 name = "nizm"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2024"
 description = "Lightweight, zero-config alternative to pre-commit"
+license = "MIT"
+repository = "https://github.com/viperadnan-git/nizm"
+readme = "README.md"
+keywords = ["git", "hooks", "pre-commit", "linter", "formatter"]
+categories = ["development-tools", "command-line-utilities"]
 
 [package.metadata.nizm.hooks]
 rustfmt = { cmd = "cargo fmt", glob = "*.rs" }

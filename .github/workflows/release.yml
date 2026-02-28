@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            npm_pkg: nizm-linux-x64
+            bin: nizm
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            npm_pkg: nizm-linux-arm64
+            bin: nizm
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            npm_pkg: nizm-darwin-x64
+            bin: nizm
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            npm_pkg: nizm-darwin-arm64
+            bin: nizm
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            npm_pkg: nizm-win32-x64
+            bin: nizm.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Set version from git tag
+        shell: bash
+        run: sed -i.bak "s/^version = \"0.0.0\"/version = \"${GITHUB_REF_NAME#v}\"/" Cargo.toml
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked
+
+      - name: Build
+        run: ${{ matrix.cross && 'cross' || 'cargo' }} build --release --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          DIR="nizm-${VERSION}-${{ matrix.target }}"
+          mkdir "$DIR"
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$DIR/"
+          cp LICENSE* README* "$DIR/" 2>/dev/null || true
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            7z a "${DIR}.zip" "$DIR"
+          else
+            tar czf "${DIR}.tar.gz" "$DIR"
+          fi
+
+      - name: Copy binary to npm package
+        shell: bash
+        run: cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "npm/${{ matrix.npm_pkg }}/${{ matrix.bin }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.npm_pkg }}
+          path: |
+            nizm-*.tar.gz
+            nizm-*.zip
+            npm/${{ matrix.npm_pkg }}/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --generate-notes \
+            artifacts/nizm-linux-x64/nizm-*.tar.gz \
+            artifacts/nizm-linux-arm64/nizm-*.tar.gz \
+            artifacts/nizm-darwin-x64/nizm-*.tar.gz \
+            artifacts/nizm-darwin-arm64/nizm-*.tar.gz \
+            artifacts/nizm-win32-x64/nizm-*.zip
+
+  publish-crate:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set version from git tag
+        run: sed -i "s/^version = \"0.0.0\"/version = \"${GITHUB_REF_NAME#v}\"/" Cargo.toml
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
+
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment: npm
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Sync version and copy binaries
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          for pkg in nizm-linux-x64 nizm-linux-arm64 nizm-darwin-x64 nizm-darwin-arm64 nizm-win32-x64; do
+            cp -r artifacts/${pkg}/npm/${pkg}/* npm/${pkg}/
+            cd npm/${pkg}
+            npm version "$VERSION" --no-git-tag-version
+            cd ../..
+          done
+          cd npm/nizm
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+            pkg.version = '$VERSION';
+            for (const k of Object.keys(pkg.optionalDependencies || {})) pkg.optionalDependencies[k] = '$VERSION';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 4) + '\n');
+          "
+
+      - name: Copy README to npm package
+        run: cp README.md npm/nizm/
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg in nizm-linux-x64 nizm-linux-arm64 nizm-darwin-x64 nizm-darwin-arm64 nizm-win32-x64; do
+            cd npm/${pkg}
+            npm publish --access public
+            cd ../..
+          done
+
+      - name: Publish root package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd npm/nizm
+          npm publish --access public

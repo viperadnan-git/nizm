@@ -1,0 +1,11 @@
+{
+    "name": "@nizm/win32-x64",
+    "version": "0.0.0",
+    "description": "nizm binary for Windows x64",
+    "license": "MIT",
+    "os": ["win32"],
+    "cpu": ["x64"],
+    "bin": {
+        "nizm": "nizm.exe"
+    }
+}

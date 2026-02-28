@@ -1,0 +1,24 @@
+{
+    "name": "nizm",
+    "version": "0.0.0",
+    "description": "Lightweight, zero-config pre-commit hooks",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/viperadnan-git/nizm"
+    },
+    "keywords": ["git", "hooks", "pre-commit", "linter", "formatter"],
+    "bin": {
+        "nizm": "bin/nizm"
+    },
+    "optionalDependencies": {
+        "@nizm/linux-x64": "0.0.0",
+        "@nizm/linux-arm64": "0.0.0",
+        "@nizm/darwin-x64": "0.0.0",
+        "@nizm/darwin-arm64": "0.0.0",
+        "@nizm/win32-x64": "0.0.0"
+    },
+    "scripts": {
+        "postinstall": "node bin/postinstall.js"
+    }
+}

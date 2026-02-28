@@ -1,0 +1,34 @@
+#!/usr/bin/env node
+
+const { execFileSync } = require("child_process");
+const path = require("path");
+
+const PLATFORMS = {
+    "linux-x64": "@nizm/linux-x64",
+    "linux-arm64": "@nizm/linux-arm64",
+    "darwin-x64": "@nizm/darwin-x64",
+    "darwin-arm64": "@nizm/darwin-arm64",
+    "win32-x64": "@nizm/win32-x64",
+};
+
+const key = `${process.platform}-${process.arch}`;
+const pkg = PLATFORMS[key];
+
+if (!pkg) {
+    console.error(`nizm: unsupported platform ${key}`);
+    process.exit(1);
+}
+
+let bin;
+try {
+    bin = require.resolve(`${pkg}/nizm`);
+} catch {
+    console.error(`nizm: package ${pkg} not installed — reinstall with npm install nizm`);
+    process.exit(1);
+}
+
+const result = require("child_process").spawnSync(bin, process.argv.slice(2), {
+    stdio: "inherit",
+});
+
+process.exit(result.status ?? 1);
