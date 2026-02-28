@@ -17,12 +17,13 @@ if (!pkg) {
 }
 
 const ext = process.platform === "win32" ? ".exe" : "";
-const path = require("path");
 let bin;
 try {
     bin = require.resolve(`${pkg}/nizm${ext}`, { paths: [__dirname] });
 } catch {
-    console.error(`nizm: package ${pkg} not installed — reinstall with npm install -g nizm-cli`);
+    console.error(
+        `nizm: package ${pkg} not installed — reinstall with npm install -g nizm-cli`,
+    );
     process.exit(1);
 }
 

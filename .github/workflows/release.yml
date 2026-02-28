@@ -148,6 +148,7 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           for pkg in nizm-linux-x64 nizm-linux-arm64 nizm-darwin-x64 nizm-darwin-arm64 nizm-win32-x64; do
             cp -r artifacts/${pkg}/npm/${pkg}/* npm/${pkg}/
+            chmod +x npm/${pkg}/nizm* 2>/dev/null || true
             cd npm/${pkg}
             npm version "$VERSION" --no-git-tag-version
             cd ../..
