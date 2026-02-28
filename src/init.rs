@@ -126,21 +126,21 @@ fn read_devdeps(filename: &str, content: &str) -> Vec<String> {
 }
 
 fn read_pyproject_devdeps(content: &str) -> Vec<String> {
-    let val: toml::Value = match toml::from_str(content) {
-        Ok(v) => v,
+    let doc: toml_edit::DocumentMut = match content.parse() {
+        Ok(d) => d,
         Err(_) => return Vec::new(),
     };
 
     let mut deps = Vec::new();
 
     // PEP 621: project.optional-dependencies.dev = ["ruff>=0.5"]
-    if let Some(list) = val
+    if let Some(list) = doc
         .get("project")
         .and_then(|p| p.get("optional-dependencies"))
         .and_then(|o| o.get("dev"))
         .and_then(|d| d.as_array())
     {
-        for item in list {
+        for item in list.iter() {
             if let Some(s) = item.as_str() {
                 deps.push(extract_pkg_name(s));
             }
@@ -148,12 +148,12 @@ fn read_pyproject_devdeps(content: &str) -> Vec<String> {
     }
 
     // PEP 735: dependency-groups.dev = ["ruff>=0.5"]
-    if let Some(list) = val
+    if let Some(list) = doc
         .get("dependency-groups")
         .and_then(|d| d.get("dev"))
         .and_then(|d| d.as_array())
     {
-        for item in list {
+        for item in list.iter() {
             if let Some(s) = item.as_str() {
                 deps.push(extract_pkg_name(s));
             }
@@ -161,7 +161,7 @@ fn read_pyproject_devdeps(content: &str) -> Vec<String> {
     }
 
     // Poetry: tool.poetry.group.dev.dependencies = { ruff = "^0.5" }
-    if let Some(table) = val
+    if let Some(table) = doc
         .get("tool")
         .and_then(|t| t.get("poetry"))
         .and_then(|p| p.get("group"))
@@ -169,7 +169,7 @@ fn read_pyproject_devdeps(content: &str) -> Vec<String> {
         .and_then(|d| d.get("dependencies"))
         .and_then(|d| d.as_table())
     {
-        deps.extend(table.keys().map(|k| k.to_string()));
+        deps.extend(table.iter().map(|(k, _)| k.to_string()));
     }
 
     deps
@@ -188,23 +188,23 @@ fn read_packagejson_devdeps(content: &str) -> Vec<String> {
 }
 
 fn read_cargo_devdeps(content: &str) -> Vec<String> {
-    let val: toml::Value = match toml::from_str(content) {
-        Ok(v) => v,
+    let doc: toml_edit::DocumentMut = match content.parse() {
+        Ok(d) => d,
         Err(_) => return Vec::new(),
     };
 
-    val.get("dev-dependencies")
+    doc.get("dev-dependencies")
         .and_then(|d| d.as_table())
-        .map(|t| t.keys().cloned().collect())
+        .map(|t| t.iter().map(|(k, _)| k.to_string()).collect())
         .unwrap_or_default()
 }
 
 fn has_cargo_package(content: &str) -> bool {
-    let val: toml::Value = match toml::from_str(content) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    val.get("package").is_some()
+    content
+        .parse::<toml_edit::DocumentMut>()
+        .ok()
+        .and_then(|doc| doc.get("package").map(|_| true))
+        .unwrap_or(false)
 }
 
 /// Strip version specifiers from a Python dependency string.

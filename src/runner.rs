@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use globset::GlobBuilder;
 use std::path::Path;
 use std::process::Command;
 
@@ -61,37 +60,17 @@ fn scope_files(
         format!("{}/", dir_str)
     };
 
-    let glob_matcher = match glob_pattern {
-        Some(pattern) => {
-            // Auto-prepend **/ for patterns without path separators
-            // so *.py matches at any depth
-            let effective = if pattern.contains('/') {
-                pattern.to_string()
-            } else {
-                format!("**/{pattern}")
-            };
-            let glob = GlobBuilder::new(&effective)
-                .literal_separator(true)
-                .build()
-                .with_context(|| format!("invalid glob: {pattern}"))?;
-            Some(glob.compile_matcher())
-        }
-        None => None,
-    };
-
     Ok(staged_files
         .iter()
         .filter_map(|file| {
-            // Scope to manifest directory (FR-7, FR-9)
             let relative = if is_root {
                 file.clone()
             } else {
                 file.strip_prefix(&prefix)?.to_string()
             };
 
-            // Apply glob filter
-            if let Some(ref matcher) = glob_matcher
-                && !matcher.is_match(&relative)
+            if let Some(pattern) = glob_pattern
+                && !glob_match(pattern, &relative)
             {
                 return None;
             }
@@ -107,4 +86,87 @@ fn shell_escape(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// Simple glob matcher supporting:
+/// - `*.ext` / `**/*.ext` — extension match at any depth
+/// - `*.{a,b,c}` — multiple extensions
+/// - `dir/*.ext` — single-level match under dir
+fn glob_match(pattern: &str, path: &str) -> bool {
+    // Patterns without `/` match at any depth (like `*.py`)
+    let pattern = if pattern.contains('/') {
+        pattern.to_string()
+    } else {
+        format!("**/{pattern}")
+    };
+
+    // Handle `*.{ext1,ext2}` — expand alternations on the extension
+    if let Some(star_pos) = pattern.rfind("*.{") {
+        let after = &pattern[star_pos + 3..];
+        if let Some(close) = after.find('}') {
+            let prefix = &pattern[..star_pos];
+            return after[..close]
+                .split(',')
+                .any(|ext| glob_match_simple(&format!("{prefix}*.{ext}"), path));
+        }
+    }
+
+    glob_match_simple(&pattern, path)
+}
+
+fn glob_match_simple(pattern: &str, path: &str) -> bool {
+    // Split into segments
+    let pat_parts: Vec<&str> = pattern.split('/').collect();
+    let path_parts: Vec<&str> = path.split('/').collect();
+    segments_match(&pat_parts, &path_parts)
+}
+
+fn segments_match(pat: &[&str], path: &[&str]) -> bool {
+    if pat.is_empty() {
+        return path.is_empty();
+    }
+    if pat[0] == "**" {
+        // ** matches zero or more path segments
+        if segments_match(&pat[1..], path) {
+            return true;
+        }
+        if !path.is_empty() {
+            return segments_match(pat, &path[1..]);
+        }
+        return false;
+    }
+    if path.is_empty() {
+        return false;
+    }
+    wildcard_match(pat[0], path[0]) && segments_match(&pat[1..], &path[1..])
+}
+
+/// Match a single segment with `*` wildcards (no `/`).
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0, 0);
+    let (mut star_pi, mut star_ti) = (usize::MAX, 0);
+
+    while ti < txt.len() {
+        if pi < pat.len() && (pat[pi] == '?' || pat[pi] == txt[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < pat.len() && pat[pi] == '*' {
+            star_pi = pi;
+            star_ti = ti;
+            pi += 1;
+        } else if star_pi != usize::MAX {
+            pi = star_pi + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < pat.len() && pat[pi] == '*' {
+        pi += 1;
+    }
+    pi == pat.len()
 }

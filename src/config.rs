@@ -119,7 +119,7 @@ struct NizmSection {
 }
 
 fn parse_pyproject(content: &str) -> Result<IndexMap<String, HookConfig>> {
-    let root: PyprojectRoot = toml::from_str(content)?;
+    let root: PyprojectRoot = toml_edit::de::from_str(content)?;
     Ok(root
         .tool
         .and_then(|t| t.nizm)
@@ -143,7 +143,7 @@ struct CargoMetadata {
 }
 
 fn parse_cargo(content: &str) -> Result<IndexMap<String, HookConfig>> {
-    let root: CargoRoot = toml::from_str(content)?;
+    let root: CargoRoot = toml_edit::de::from_str(content)?;
     Ok(root
         .package
         .and_then(|p| p.metadata)
@@ -153,7 +153,7 @@ fn parse_cargo(content: &str) -> Result<IndexMap<String, HookConfig>> {
 }
 
 fn parse_nizm_toml(content: &str) -> Result<IndexMap<String, HookConfig>> {
-    let section: NizmSection = toml::from_str(content)?;
+    let section: NizmSection = toml_edit::de::from_str(content)?;
     Ok(section.hooks.unwrap_or_default())
 }
 
