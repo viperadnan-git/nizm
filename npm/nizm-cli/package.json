@@ -1,5 +1,5 @@
 {
-    "name": "nizm",
+    "name": "nizm-cli",
     "version": "0.0.0",
     "description": "Lightweight, zero-config pre-commit hooks",
     "license": "MIT",

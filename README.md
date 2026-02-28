@@ -41,7 +41,7 @@ $ nizm run
 
 ```bash
 # Install
-npm install --save-dev nizm   # or: cargo install nizm
+npm install --save-dev nizm-cli   # or: cargo install nizm
 
 # Scan your project and inject hooks into your manifest
 nizm init
@@ -67,7 +67,7 @@ cargo install nizm
 <summary><strong>npm / bun / pnpm / yarn</strong></summary>
 
 ```bash
-npm install --save-dev nizm
+npm install --save-dev nizm-cli
 ```
 
 Platform-native binary — zero Node.js overhead at runtime. The postinstall script replaces the JS wrapper with your platform's prebuilt binary.
@@ -320,8 +320,8 @@ Built with Rust. No runtime dependencies. Just fast hooks.
 
 [crate-badge]: https://img.shields.io/crates/v/nizm?style=flat-square&labelColor=1a1a2e&color=e94560
 [crate-url]: https://crates.io/crates/nizm
-[npm-badge]: https://img.shields.io/npm/v/nizm?style=flat-square&labelColor=1a1a2e&color=0f3460
-[npm-url]: https://www.npmjs.com/package/nizm
+[npm-badge]: https://img.shields.io/npm/v/nizm-cli?style=flat-square&labelColor=1a1a2e&color=0f3460
+[npm-url]: https://www.npmjs.com/package/nizm-cli
 [ci-badge]: https://img.shields.io/github/actions/workflow/status/viperadnan-git/nizm/ci.yml?style=flat-square&labelColor=1a1a2e&label=CI
 [ci-url]: https://github.com/viperadnan-git/nizm/actions/workflows/ci.yml
 [license-badge]: https://img.shields.io/badge/license-MIT-16c79a?style=flat-square&labelColor=1a1a2e

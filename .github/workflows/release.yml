@@ -144,7 +144,7 @@ jobs:
             npm version "$VERSION" --no-git-tag-version
             cd ../..
           done
-          cd npm/nizm
+          cd npm/nizm-cli
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
@@ -154,7 +154,7 @@ jobs:
           "
 
       - name: Copy README to npm package
-        run: cp README.md npm/nizm/
+        run: cp README.md npm/nizm-cli/
 
       - name: Publish platform packages
         env:
@@ -170,5 +170,5 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          cd npm/nizm
+          cd npm/nizm-cli
           npm publish --access public
