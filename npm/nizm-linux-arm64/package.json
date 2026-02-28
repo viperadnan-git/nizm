@@ -1,5 +1,5 @@
 {
-    "name": "@nizm/linux-arm64",
+    "name": "@nizm-cli/linux-arm64",
     "version": "0.0.0",
     "description": "nizm binary for linux arm64",
     "license": "MIT",

@@ -1,5 +1,5 @@
 {
-    "name": "@nizm/darwin-arm64",
+    "name": "@nizm-cli/darwin-arm64",
     "version": "0.0.0",
     "description": "nizm binary for macOS arm64",
     "license": "MIT",

@@ -2,11 +2,11 @@ const fs = require("fs");
 const path = require("path");
 
 const PLATFORMS = {
-    "linux-x64": "@nizm/linux-x64",
-    "linux-arm64": "@nizm/linux-arm64",
-    "darwin-x64": "@nizm/darwin-x64",
-    "darwin-arm64": "@nizm/darwin-arm64",
-    "win32-x64": "@nizm/win32-x64",
+    "linux-x64": "@nizm-cli/linux-x64",
+    "linux-arm64": "@nizm-cli/linux-arm64",
+    "darwin-x64": "@nizm-cli/darwin-x64",
+    "darwin-arm64": "@nizm-cli/darwin-arm64",
+    "win32-x64": "@nizm-cli/win32-x64",
 };
 
 const key = `${process.platform}-${process.arch}`;
