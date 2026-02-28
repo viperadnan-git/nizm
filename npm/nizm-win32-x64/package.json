@@ -3,6 +3,7 @@
     "version": "0.0.0",
     "description": "nizm binary for Windows x64",
     "license": "MIT",
+    "repository": { "type": "git", "url": "https://github.com/viperadnan-git/nizm" },
     "os": ["win32"],
     "cpu": ["x64"]
 }

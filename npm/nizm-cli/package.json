@@ -19,6 +19,7 @@
         "@nizm-cli/win32-x64": "0.0.0"
     },
     "files": [
-        "bin/nizm"
+        "bin/nizm",
+        "README.md"
     ]
 }
