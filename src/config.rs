@@ -24,8 +24,15 @@ pub struct ManifestConfig {
 
 const MAX_DEPTH: usize = 5;
 const SKIP_DIRS: &[&str] = &[
-    "node_modules", ".git", "target", "dist", "build",
-    ".venv", "venv", "__pycache__", ".tox",
+    "node_modules",
+    ".git",
+    "target",
+    "dist",
+    "build",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".tox",
 ];
 const MANIFEST_NAMES: &[&str] = &["pyproject.toml", "package.json", "Cargo.toml", ".nizm.toml"];
 

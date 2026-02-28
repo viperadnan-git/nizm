@@ -1,8 +1,12 @@
 mod config;
+mod doctor;
 mod git;
+mod init;
 mod installer;
+mod knowledge;
 mod runner;
 mod stash;
+mod style;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -10,7 +14,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 #[derive(Parser)]
-#[command(name = "nizm", version, about = "Lightweight, zero-config pre-commit hooks")]
+#[command(
+    name = "nizm",
+    version,
+    about = "Lightweight, zero-config pre-commit hooks"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -30,13 +38,17 @@ enum Commands {
     },
     /// Install pre-commit hook
     Install,
+    /// Diagnose pre-commit hook health
+    Doctor,
+    /// Scan dev-dependencies and suggest hooks
+    Init,
 }
 
 fn main() -> ExitCode {
     match try_main() {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("Error: {e:#}");
+            eprintln!("{} {e:#}", style::red_bold("Error:"));
             ExitCode::FAILURE
         }
     }
@@ -50,6 +62,18 @@ fn try_main() -> Result<ExitCode> {
         Commands::Run { config, hook } => run(repo_root, config, hook),
         Commands::Install => {
             installer::install(&repo_root)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Doctor => {
+            let all_passed = doctor::doctor(&repo_root)?;
+            Ok(if all_passed {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+        Commands::Init => {
+            init::init(&repo_root)?;
             Ok(ExitCode::SUCCESS)
         }
     }
@@ -84,7 +108,11 @@ fn run(
         return Ok(ExitCode::SUCCESS);
     }
 
-    println!("nizm: running against {} file(s)", files.len());
+    println!(
+        "{} running against {} file(s)",
+        style::bold("nizm:"),
+        files.len()
+    );
 
     // FR-17: Stash unstaged changes if partial staging detected.
     // StashGuard restores on Drop (scope exit, panic, or after Ctrl+C breaks the loop).
@@ -104,15 +132,19 @@ fn run(
                 break 'hooks;
             }
 
-            if let Some(ref filter) = hook_filter {
-                if hook.name != *filter {
-                    continue;
-                }
+            if let Some(ref filter) = hook_filter
+                && hook.name != *filter
+            {
+                continue;
             }
 
             let code = runner::exec_hook(hook, &files, manifest_dir, &abs_cwd)?;
             if code != 0 {
-                eprintln!("  {} failed (exit {})", hook.name, code);
+                eprintln!(
+                    "  {} {}",
+                    style::bold(&hook.name),
+                    style::red_bold(&format!("failed (exit {code})"))
+                );
                 failed = true;
             }
         }
@@ -122,7 +154,11 @@ fn run(
     let modified = git::modified_staged_files(&files)?;
     if !modified.is_empty() {
         git::add_files(&modified)?;
-        println!("nizm: auto-staged {} modified file(s)", modified.len());
+        println!(
+            "{} {}",
+            style::bold("nizm:"),
+            style::green(&format!("auto-staged {} modified file(s)", modified.len()))
+        );
     }
 
     // Explicit restore — Drop is the fallback.

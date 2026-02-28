@@ -168,10 +168,10 @@ fn restore_untracked_from_stash() -> Result<()> {
             .output()?;
 
         if content.status.success() {
-            if let Some(parent) = std::path::Path::new(file).parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent)?;
-                }
+            if let Some(parent) = std::path::Path::new(file).parent()
+                && !parent.as_os_str().is_empty()
+            {
+                std::fs::create_dir_all(parent)?;
             }
             std::fs::write(file, &content.stdout)?;
         }

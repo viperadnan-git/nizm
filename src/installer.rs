@@ -3,9 +3,9 @@ use dialoguer::{Confirm, MultiSelect};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use crate::config;
+use crate::{config, style};
 
-const HOOK_MARKER: &str = "# nizm-managed";
+pub const HOOK_MARKER: &str = "# nizm-managed";
 
 pub fn install(repo_root: &Path) -> Result<()> {
     println!("scanning for manifests...");
@@ -40,7 +40,11 @@ pub fn install(repo_root: &Path) -> Result<()> {
     for path in &selected {
         let cfg = config::parse_manifest(repo_root, path)?;
         if cfg.hooks.is_empty() {
-            println!("  warning: {} has no nizm hooks", path.display());
+            println!(
+                "  {} {} has no nizm hooks",
+                style::yellow("warning:"),
+                path.display()
+            );
         } else {
             let names: Vec<_> = cfg.hooks.iter().map(|h| h.name.as_str()).collect();
             println!("  {} — [{}]", path.display(), names.join(", "));
@@ -57,13 +61,13 @@ pub fn install(repo_root: &Path) -> Result<()> {
             .default(false)
             .interact()?
         {
-            println!("aborting — existing hook preserved");
+            println!("{}", style::yellow("aborting — existing hook preserved"));
             return Ok(());
         }
     }
 
     bake_hook(repo_root, &selected)?;
-    println!("pre-commit hook installed");
+    println!("{}", style::green("pre-commit hook installed"));
     Ok(())
 }
 
@@ -77,12 +81,17 @@ fn bake_hook(repo_root: &Path, manifests: &[&std::path::PathBuf]) -> Result<()> 
         .collect();
 
     let script = format!(
-        "#!/bin/sh\n{HOOK_MARKER}\nexec nizm run{config_args}\n"
+        "#!/bin/sh\n\
+         {HOOK_MARKER}\n\
+         if ! command -v nizm >/dev/null 2>&1; then\n\
+         \x20 echo \"nizm: not found in PATH — install it or run: cargo install nizm\" >&2\n\
+         \x20 exit 1\n\
+         fi\n\
+         exec nizm run{config_args}\n"
     );
 
     let hook_path = hooks_dir.join("pre-commit");
-    std::fs::write(&hook_path, &script)
-        .context("failed to write pre-commit hook")?;
+    std::fs::write(&hook_path, &script).context("failed to write pre-commit hook")?;
 
     let mut perms = std::fs::metadata(&hook_path)?.permissions();
     perms.set_mode(0o755);

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 
-use crate::git;
+use crate::{git, style};
 
 /// Whether a stash is active and needs restoring.
 static STASH_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -30,7 +30,10 @@ impl StashGuard {
             return Ok(None);
         }
 
-        println!("nizm: partial staging detected — stashing unstaged changes");
+        println!(
+            "{} partial staging detected — stashing unstaged changes",
+            style::bold("nizm:")
+        );
 
         // FR-18: rescue snapshot before any destructive operation
         git::create_rescue_ref()?;
@@ -62,14 +65,14 @@ impl Drop for StashGuard {
             // catch_unwind prevents double-panic abort if restore panics during unwind.
             let result = panic::catch_unwind(|| {
                 if let Err(e) = git::restore_unstaged() {
-                    eprintln!("nizm: failed to restore stash: {e}");
+                    eprintln!("{} failed to restore stash: {e}", style::red_bold("nizm:"));
                     eprintln!("nizm: rescue snapshot: git stash apply refs/nizm-backup");
                     return;
                 }
                 let _ = git::drop_rescue_ref();
             });
             if result.is_err() {
-                eprintln!("nizm: panic during stash restore");
+                eprintln!("{} panic during stash restore", style::red_bold("nizm:"));
                 eprintln!("nizm: rescue snapshot: git stash apply refs/nizm-backup");
             }
         }

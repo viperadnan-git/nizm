@@ -3,17 +3,22 @@ use globset::GlobBuilder;
 use std::path::Path;
 use std::process::Command;
 
-use crate::config::Hook;
+use crate::{config::Hook, style};
 
 /// Execute a hook with scope filtering and CWD isolation.
-pub fn exec_hook(hook: &Hook, staged_files: &[String], manifest_dir: &Path, abs_cwd: &Path) -> Result<i32> {
+pub fn exec_hook(
+    hook: &Hook,
+    staged_files: &[String],
+    manifest_dir: &Path,
+    abs_cwd: &Path,
+) -> Result<i32> {
     let scoped = scope_files(staged_files, manifest_dir, hook.glob.as_deref())?;
 
     if scoped.is_empty() {
         return Ok(0);
     }
 
-    println!("  {} ({} file(s))", hook.name, scoped.len());
+    println!("  {} ({} file(s))", style::bold(&hook.name), scoped.len());
     exec_cmd(&hook.cmd, &scoped, Some(abs_cwd))
 }
 
@@ -85,10 +90,10 @@ fn scope_files(
             };
 
             // Apply glob filter
-            if let Some(ref matcher) = glob_matcher {
-                if !matcher.is_match(&relative) {
-                    return None;
-                }
+            if let Some(ref matcher) = glob_matcher
+                && !matcher.is_match(&relative)
+            {
+                return None;
             }
 
             Some(relative)
