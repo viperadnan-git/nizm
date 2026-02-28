@@ -41,7 +41,7 @@ $ nizm run
 
 ```bash
 # Install
-npm install --save-dev nizm-cli   # or: cargo install nizm
+npm install -g nizm-cli   # or: cargo install nizm
 
 # Scan your project and inject hooks into your manifest
 nizm init
@@ -67,7 +67,7 @@ cargo install nizm
 <summary><strong>npm / bun / pnpm / yarn</strong></summary>
 
 ```bash
-npm install --save-dev nizm-cli
+npm install -g nizm-cli
 ```
 
 Platform-native binary — zero Node.js overhead at runtime. The postinstall script replaces the JS wrapper with your platform's prebuilt binary.
