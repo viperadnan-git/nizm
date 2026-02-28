@@ -50,6 +50,10 @@ enum Commands {
         /// Bake --parallel flag into hook script
         #[arg(long)]
         parallel: bool,
+
+        /// Overwrite existing hook without prompting
+        #[arg(long)]
+        force: bool,
     },
     /// Diagnose pre-commit hook health
     Doctor,
@@ -81,8 +85,12 @@ fn try_main() -> Result<ExitCode> {
             hook,
             parallel,
         } => run(repo_root, config, hook, parallel),
-        Commands::Install { config, parallel } => {
-            installer::install(&repo_root, config, parallel)?;
+        Commands::Install {
+            config,
+            parallel,
+            force,
+        } => {
+            installer::install(&repo_root, config, parallel, force)?;
             Ok(ExitCode::SUCCESS)
         }
         Commands::Doctor => {

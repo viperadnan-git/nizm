@@ -1,14 +1,27 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use dialoguer::{Confirm, MultiSelect};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::{config, style};
 
-pub const HOOK_MARKER: &str = "# nizm-managed";
+pub const BLOCK_START: &str = "# nizm-start";
+pub const BLOCK_END: &str = "# nizm-end";
 
-pub fn install(repo_root: &Path, explicit_configs: Vec<PathBuf>, parallel: bool) -> Result<()> {
-    let selected: Vec<PathBuf> = if !explicit_configs.is_empty() {
+pub fn is_nizm_managed(content: &str) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+    lines.iter().any(|l| l.trim() == BLOCK_START) && lines.iter().any(|l| l.trim() == BLOCK_END)
+}
+
+pub fn install(
+    repo_root: &Path,
+    explicit_configs: Vec<PathBuf>,
+    parallel: bool,
+    force: bool,
+) -> Result<()> {
+    let interactive = explicit_configs.is_empty();
+
+    let selected: Vec<PathBuf> = if !interactive {
         explicit_configs
     } else {
         println!("scanning for manifests...");
@@ -58,30 +71,68 @@ pub fn install(repo_root: &Path, explicit_configs: Vec<PathBuf>, parallel: bool)
     }
 
     let hook_path = repo_root.join(".git/hooks/pre-commit");
-    if hook_path.exists() {
-        let content = std::fs::read_to_string(&hook_path)?;
-        if content.contains(HOOK_MARKER) {
-            println!("existing nizm hook found — updating");
-        } else if !Confirm::new()
-            .with_prompt("pre-commit hook exists (not nizm) — overwrite?")
+    let block = generate_block(&selected, parallel);
+
+    if !hook_path.exists() {
+        std::fs::create_dir_all(hook_path.parent().unwrap())?;
+        write_hook(&hook_path, &format!("#!/bin/sh\n{block}\n"))?;
+        println!("{}", style::green("pre-commit hook installed"));
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&hook_path)?;
+
+    if is_nizm_managed(&content) {
+        if blocks_match(&content, &block) {
+            println!("{}", style::green("pre-commit hook already up to date"));
+            return Ok(());
+        }
+
+        if has_custom_block_content(&content) {
+            require_overwrite_consent("nizm block has custom modifications", force, interactive)?;
+        } else {
+            println!("updating nizm block");
+        }
+
+        let new_content = replace_block(&content, &block)?;
+        write_hook(&hook_path, &new_content)?;
+        println!("{}", style::green("pre-commit hook updated"));
+    } else {
+        // Foreign hook — append nizm block
+        let mut new_content = content;
+        if !new_content.ends_with('\n') {
+            new_content.push('\n');
+        }
+        new_content.push('\n');
+        new_content.push_str(&block);
+        new_content.push('\n');
+        write_hook(&hook_path, &new_content)?;
+        println!("{} appended to existing hook", style::green("nizm block"));
+    }
+
+    Ok(())
+}
+
+fn require_overwrite_consent(message: &str, force: bool, interactive: bool) -> Result<()> {
+    if force {
+        println!("{} {} (--force)", style::yellow("warning:"), message);
+    } else if interactive {
+        println!("{} {}", style::yellow("warning:"), message);
+        if !Confirm::new()
+            .with_prompt("overwrite?")
             .default(false)
             .interact()?
         {
             println!("{}", style::yellow("aborting — existing hook preserved"));
-            return Ok(());
+            bail!("aborted by user");
         }
+    } else {
+        bail!("{message} — use --force to overwrite");
     }
-
-    let refs: Vec<&PathBuf> = selected.iter().collect();
-    bake_hook(repo_root, &refs, parallel)?;
-    println!("{}", style::green("pre-commit hook installed"));
     Ok(())
 }
 
-fn bake_hook(repo_root: &Path, manifests: &[&std::path::PathBuf], parallel: bool) -> Result<()> {
-    let hooks_dir = repo_root.join(".git/hooks");
-    std::fs::create_dir_all(&hooks_dir)?;
-
+fn generate_block(manifests: &[PathBuf], parallel: bool) -> String {
     let config_args: String = manifests
         .iter()
         .map(|p| format!(" --config {}", p.display()))
@@ -89,23 +140,96 @@ fn bake_hook(repo_root: &Path, manifests: &[&std::path::PathBuf], parallel: bool
 
     let parallel_flag = if parallel { " --parallel" } else { "" };
 
-    let script = format!(
-        "#!/bin/sh\n\
-         {HOOK_MARKER}\n\
+    format!(
+        "{BLOCK_START}\n\
          if ! command -v nizm >/dev/null 2>&1; then\n\
          \x20 echo \"nizm: not found in PATH — install it or run: cargo install nizm\" >&2\n\
          \x20 exit 1\n\
          fi\n\
-         exec nizm run{config_args}{parallel_flag}\n"
-    );
+         nizm run{config_args}{parallel_flag} || exit $?\n\
+         {BLOCK_END}"
+    )
+}
 
-    let hook_path = hooks_dir.join("pre-commit");
-    std::fs::write(&hook_path, &script).context("failed to write pre-commit hook")?;
+fn blocks_match(content: &str, expected_block: &str) -> bool {
+    let existing = match extract_block_lines(content) {
+        Some(lines) => lines,
+        None => return false,
+    };
+    let expected: Vec<&str> = expected_block.lines().map(|l| l.trim()).collect();
+    existing == expected
+}
 
-    let mut perms = std::fs::metadata(&hook_path)?.permissions();
+fn extract_block_lines(content: &str) -> Option<Vec<&str>> {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.iter().position(|l| l.trim() == BLOCK_START)?;
+    let end = lines
+        .iter()
+        .rposition(|l| l.trim() == BLOCK_END)
+        .filter(|&e| e > start)?;
+    Some(lines[start..=end].iter().map(|l| l.trim()).collect())
+}
+
+fn has_custom_block_content(content: &str) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = match lines.iter().position(|l| l.trim() == BLOCK_START) {
+        Some(i) => i,
+        None => return false,
+    };
+    let end = match lines.iter().rposition(|l| l.trim() == BLOCK_END) {
+        Some(i) if i > start => i,
+        _ => return false,
+    };
+
+    for line in &lines[start + 1..end] {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("if ! command -v nizm")
+            || trimmed.starts_with("echo \"nizm:")
+            || trimmed == "exit 1"
+            || trimmed == "fi"
+            || trimmed.starts_with("nizm run")
+        {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+fn replace_block(content: &str, new_block: &str) -> Result<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines
+        .iter()
+        .position(|l| l.trim() == BLOCK_START)
+        .context("block start marker not found")?;
+    let end = lines
+        .iter()
+        .rposition(|l| l.trim() == BLOCK_END)
+        .filter(|&e| e > start)
+        .context("block end marker not found")?;
+
+    let mut result: Vec<&str> = Vec::new();
+    result.extend_from_slice(&lines[..start]);
+    for line in new_block.lines() {
+        result.push(line);
+    }
+    if end + 1 < lines.len() {
+        result.extend_from_slice(&lines[end + 1..]);
+    }
+
+    let mut out = result.join("\n");
+    if content.ends_with('\n') {
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn write_hook(hook_path: &Path, content: &str) -> Result<()> {
+    std::fs::write(hook_path, content).context("failed to write pre-commit hook")?;
+    let mut perms = std::fs::metadata(hook_path)?.permissions();
     perms.set_mode(0o755);
-    std::fs::set_permissions(&hook_path, perms)?;
-
+    std::fs::set_permissions(hook_path, perms)?;
     Ok(())
 }
 

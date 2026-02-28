@@ -3,7 +3,7 @@ use dialoguer::MultiSelect;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::{config, knowledge, style};
+use crate::{config, installer, knowledge, style};
 
 pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
     let manifests = config::discover_manifests(repo_root)?;
@@ -16,6 +16,7 @@ pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
     }
 
     let mut suggestions: Vec<Suggestion> = Vec::new();
+    let mut any_deps_found = false;
 
     for manifest_path in &manifests {
         let full_path = repo_root.join(manifest_path);
@@ -35,6 +36,9 @@ pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
             .unwrap_or_default();
 
         let deps = read_devdeps(filename, &content);
+        if !deps.is_empty() {
+            any_deps_found = true;
+        }
 
         for dep in &deps {
             for entry in knowledge::lookup(dep) {
@@ -49,6 +53,7 @@ pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
 
         // Rust implicit tools (clippy, rustfmt)
         if filename == "Cargo.toml" && has_cargo_package(&content) {
+            any_deps_found = true;
             for entry in knowledge::RUST_IMPLICIT {
                 if !existing.contains(entry.name) {
                     suggestions.push(Suggestion {
@@ -65,10 +70,17 @@ pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
     suggestions.retain(|s| seen.insert((s.manifest.clone(), s.entry.name)));
 
     if suggestions.is_empty() {
-        println!(
-            "{}",
-            style::yellow("no hooks to suggest — all detected tools are already configured")
-        );
+        if any_deps_found {
+            println!(
+                "{}",
+                style::yellow("no hooks to suggest — all detected tools are already configured")
+            );
+        } else {
+            println!(
+                "{}",
+                style::yellow("no dev-dependencies found in any manifest")
+            );
+        }
         return Ok(());
     }
 
@@ -156,7 +168,16 @@ pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
         }
     }
 
-    println!("{}", style::green("done — run `nizm install` to activate"));
+    // Collect unique manifests that received hooks
+    let mut used_manifests: Vec<std::path::PathBuf> = selections
+        .iter()
+        .map(|&i| suggestions[i].manifest.clone())
+        .collect();
+    used_manifests.sort();
+    used_manifests.dedup();
+
+    println!();
+    installer::install(repo_root, used_manifests, false, false)?;
     Ok(())
 }
 

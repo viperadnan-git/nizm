@@ -25,23 +25,22 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
         }
     };
 
-    // Check 2: nizm-managed?
-    if !content.contains(installer::HOOK_MARKER) {
-        let tool = detect_tool(&content, repo_root);
+    // Check 2: nizm block present?
+    if !installer::is_nizm_managed(&content) {
         println!(
-            "  {}: {} ({})",
+            "  {}: {} — no nizm block found",
             style::bold("hook"),
-            style::red_bold("OVERWRITTEN"),
-            tool
+            style::red_bold("MISSING")
         );
+        println!("        run `nizm install` to add nizm block");
         fail += 1;
 
         if dialoguer::Confirm::new()
-            .with_prompt("  repair by re-installing?")
+            .with_prompt("  install now?")
             .default(true)
             .interact()?
         {
-            installer::install(repo_root, Vec::new(), false)?;
+            installer::install(repo_root, Vec::new(), false, false)?;
             println!();
             return doctor(repo_root);
         }
@@ -58,7 +57,7 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
     let configs = parse_baked_configs(&content);
     if configs.is_empty() {
         println!(
-            "  {}: {} — no exec line in hook script",
+            "  {}: {} — no nizm run line in hook script",
             style::bold("configs"),
             style::red_bold("BROKEN")
         );
@@ -70,7 +69,7 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
             .default(true)
             .interact()?
         {
-            installer::install(repo_root, Vec::new(), false)?;
+            installer::install(repo_root, Vec::new(), false, true)?;
             println!();
             return doctor(repo_root);
         }
@@ -162,7 +161,7 @@ fn parse_baked_configs(content: &str) -> Vec<PathBuf> {
     let mut configs = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
-        if !trimmed.starts_with("exec nizm") && !trimmed.starts_with("nizm") {
+        if !trimmed.starts_with("nizm") {
             continue;
         }
         let mut parts = trimmed.split_whitespace().peekable();
@@ -175,24 +174,6 @@ fn parse_baked_configs(content: &str) -> Vec<PathBuf> {
         }
     }
     configs
-}
-
-/// Detect which tool overwrote the hook.
-fn detect_tool(content: &str, repo_root: &Path) -> &'static str {
-    let lower = content.to_lowercase();
-    if lower.contains("husky") || repo_root.join(".husky").is_dir() {
-        return "husky";
-    }
-    if lower.contains("lefthook") {
-        return "lefthook";
-    }
-    if lower.contains("lint-staged") {
-        return "lint-staged";
-    }
-    if lower.contains("pre-commit") && lower.contains("python") {
-        return "pre-commit (python)";
-    }
-    "unknown tool"
 }
 
 /// Extract the first executable from a command string.
