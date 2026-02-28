@@ -70,7 +70,9 @@ jobs:
 
       - name: Copy binary to npm package
         shell: bash
-        run: cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "npm/${{ matrix.npm_pkg }}/${{ matrix.bin }}"
+        run: |
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "npm/${{ matrix.npm_pkg }}/${{ matrix.bin }}"
+          chmod +x "npm/${{ matrix.npm_pkg }}/${{ matrix.bin }}"
 
       - uses: actions/upload-artifact@v7
         with:
