@@ -4,8 +4,5 @@
     "description": "nizm binary for linux arm64",
     "license": "MIT",
     "os": ["linux"],
-    "cpu": ["arm64"],
-    "bin": {
-        "nizm": "nizm"
-    }
+    "cpu": ["arm64"]
 }

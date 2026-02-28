@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 
-const { execFileSync } = require("child_process");
-const path = require("path");
-
 const PLATFORMS = {
     "linux-x64": "@nizm-cli/linux-x64",
     "linux-arm64": "@nizm-cli/linux-arm64",
@@ -19,16 +16,19 @@ if (!pkg) {
     process.exit(1);
 }
 
+const ext = process.platform === "win32" ? ".exe" : "";
 let bin;
 try {
-    bin = require.resolve(`${pkg}/nizm`);
+    bin = require.resolve(`${pkg}/nizm${ext}`);
 } catch {
     console.error(`nizm: package ${pkg} not installed — reinstall with npm install -g nizm-cli`);
     process.exit(1);
 }
 
 const result = require("child_process").spawnSync(bin, process.argv.slice(2), {
+    shell: false,
     stdio: "inherit",
 });
 
-process.exit(result.status ?? 1);
+if (result.error) throw result.error;
+process.exitCode = result.status ?? 1;
