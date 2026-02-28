@@ -7,6 +7,7 @@ mod knowledge;
 mod runner;
 mod stash;
 mod style;
+mod uninstaller;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -63,6 +64,12 @@ enum Commands {
         #[arg(value_name = "HOOK")]
         hooks: Vec<String>,
     },
+    /// Remove nizm from the project
+    Uninstall {
+        /// Also remove nizm hook config from manifests
+        #[arg(long)]
+        purge: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -103,6 +110,10 @@ fn try_main() -> Result<ExitCode> {
         }
         Commands::Init { hooks } => {
             init::init(&repo_root, hooks)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Uninstall { purge } => {
+            uninstaller::uninstall(&repo_root, purge)?;
             Ok(ExitCode::SUCCESS)
         }
     }
