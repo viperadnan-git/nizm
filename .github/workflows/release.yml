@@ -134,7 +134,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: latest
           registry-url: https://registry.npmjs.org
 
       - uses: actions/download-artifact@v8
@@ -166,11 +166,11 @@ jobs:
         run: |
           for pkg in nizm-linux-x64 nizm-linux-arm64 nizm-darwin-x64 nizm-darwin-arm64 nizm-win32-x64; do
             cd npm/${pkg}
-            npm publish --access public --provenance
+            NODE_AUTH_TOKEN="" npm publish --access public --provenance
             cd ../..
           done
 
       - name: Publish root package
         run: |
           cd npm/nizm-cli
-          npm publish --access public --provenance
+          NODE_AUTH_TOKEN="" npm publish --access public --provenance
