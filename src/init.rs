@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::{config, knowledge, style};
 
-pub fn init(repo_root: &Path) -> Result<()> {
+pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
     let manifests = config::discover_manifests(repo_root)?;
     if manifests.is_empty() {
         println!(
@@ -37,13 +37,13 @@ pub fn init(repo_root: &Path) -> Result<()> {
         let deps = read_devdeps(filename, &content);
 
         for dep in &deps {
-            if let Some(entry) = knowledge::lookup(dep)
-                && !existing.contains(entry.name)
-            {
-                suggestions.push(Suggestion {
-                    manifest: manifest_path.clone(),
-                    entry,
-                });
+            for entry in knowledge::lookup(dep) {
+                if !existing.contains(entry.name) {
+                    suggestions.push(Suggestion {
+                        manifest: manifest_path.clone(),
+                        entry,
+                    });
+                }
             }
         }
 
@@ -72,20 +72,40 @@ pub fn init(repo_root: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let labels: Vec<String> = suggestions
-        .iter()
-        .map(|s| s.entry.name.to_string())
-        .collect();
+    let selections: Vec<usize> = if !explicit_hooks.is_empty() {
+        let indices: Vec<usize> = explicit_hooks
+            .iter()
+            .filter_map(|name| suggestions.iter().position(|s| s.entry.name == name))
+            .collect();
+        if indices.is_empty() {
+            println!(
+                "{}",
+                style::yellow("none of the specified hooks match available suggestions")
+            );
+            return Ok(());
+        }
+        indices
+    } else {
+        let labels: Vec<String> = suggestions
+            .iter()
+            .map(|s| s.entry.name.to_string())
+            .collect();
 
-    let selections = MultiSelect::new()
-        .with_prompt("select hooks to add (space = toggle, enter = confirm)")
-        .items(&labels)
-        .interact()?;
+        let sel = MultiSelect::new()
+            .with_prompt("select hooks to add (space = toggle, enter = confirm)")
+            .items(&labels)
+            .interact()?;
 
-    if selections.is_empty() {
-        println!("nothing selected");
-        return Ok(());
-    }
+        if sel.is_empty() {
+            println!("nothing selected");
+            return Ok(());
+        }
+        sel
+    };
+
+    let mut added_ruff = false;
+    let mut ruff_pyproject: Option<std::path::PathBuf> = None;
+    let mut prettier_dirs: Vec<std::path::PathBuf> = Vec::new();
 
     for &i in &selections {
         let s = &suggestions[i];
@@ -103,6 +123,37 @@ pub fn init(repo_root: &Path) -> Result<()> {
             style::bold(&format!("{:<12}", s.entry.name)),
             s.entry.cmd
         );
+
+        if s.entry.name.starts_with("ruff") && filename == "pyproject.toml" && !added_ruff {
+            ruff_pyproject = Some(full_path.clone());
+            added_ruff = true;
+        }
+        if s.entry.name == "prettier" {
+            let dir = full_path.parent().unwrap_or(repo_root);
+            prettier_dirs.push(dir.to_path_buf());
+        }
+    }
+
+    // Inject ruff config into pyproject.toml
+    if let Some(ref pyproject_path) = ruff_pyproject
+        && inject_ruff_config(pyproject_path)?
+    {
+        println!(
+            "  {} {}",
+            style::green("config"),
+            style::bold("[tool.ruff.lint] → pyproject.toml")
+        );
+    }
+
+    // Create .prettierrc next to package.json
+    for dir in &prettier_dirs {
+        if create_prettierrc(dir)? {
+            println!(
+                "  {} {}",
+                style::green("config"),
+                style::bold(".prettierrc created")
+            );
+        }
     }
 
     println!("{}", style::green("done — run `nizm install` to activate"));
@@ -459,4 +510,89 @@ fn json_find_matching_brace(content: &str, open: usize) -> Result<usize> {
     }
 
     anyhow::bail!("unmatched brace in JSON")
+}
+
+// --- Tool config injection ---
+
+/// Returns `true` if config was injected, `false` if skipped (already exists).
+fn inject_ruff_config(pyproject_path: &Path) -> Result<bool> {
+    let content = std::fs::read_to_string(pyproject_path)
+        .with_context(|| format!("failed to read {}", pyproject_path.display()))?;
+
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .context("failed to parse TOML")?;
+
+    // Skip if any [tool.ruff] config already exists
+    if doc.get("tool").and_then(|t| t.get("ruff")).is_some() {
+        return Ok(false);
+    }
+
+    // Navigate/create tool.ruff.lint
+    let mut table = doc.as_table_mut();
+    for &key in &["tool", "ruff", "lint"] {
+        if !table.contains_key(key) {
+            let mut t = toml_edit::Table::new();
+            t.set_implicit(true);
+            table.insert(key, toml_edit::Item::Table(t));
+        }
+        table = table[key]
+            .as_table_mut()
+            .context("expected table in TOML")?;
+    }
+    let lint = table;
+
+    // select = ["F", "I"]
+    let mut select = toml_edit::Array::new();
+    select.push("F");
+    select.push("I");
+    lint.insert("select", toml_edit::value(select));
+
+    // fixable = ["F401", "I"]
+    let mut fixable = toml_edit::Array::new();
+    fixable.push("F401");
+    fixable.push("I");
+    lint.insert("fixable", toml_edit::value(fixable));
+
+    std::fs::write(pyproject_path, doc.to_string())
+        .with_context(|| format!("failed to write {}", pyproject_path.display()))?;
+
+    Ok(true)
+}
+
+const PRETTIERRC_CONTENT: &str = r#"{
+    "tabWidth": 4,
+    "useTabs": false,
+    "singleQuote": false,
+    "trailingComma": "es5",
+    "endOfLine": "lf",
+    "arrowParens": "always",
+    "bracketSameLine": true,
+    "printWidth": 120
+}
+"#;
+
+const PRETTIER_CONFIG_FILES: &[&str] = &[
+    ".prettierrc",
+    ".prettierrc.json",
+    ".prettierrc.yml",
+    ".prettierrc.yaml",
+    ".prettierrc.toml",
+    ".prettierrc.js",
+    ".prettierrc.cjs",
+    ".prettierrc.mjs",
+    "prettier.config.js",
+    "prettier.config.cjs",
+    "prettier.config.mjs",
+];
+
+/// Returns `true` if file was created, `false` if skipped (config already exists).
+fn create_prettierrc(dir: &Path) -> Result<bool> {
+    if PRETTIER_CONFIG_FILES.iter().any(|f| dir.join(f).exists()) {
+        return Ok(false);
+    }
+    let path = dir.join(".prettierrc");
+    std::fs::write(&path, PRETTIERRC_CONTENT)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(true)
 }

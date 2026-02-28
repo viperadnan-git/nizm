@@ -5,18 +5,18 @@ edition = "2024"
 description = "Lightweight, zero-config alternative to pre-commit"
 
 [package.metadata.nizm.hooks]
-rustfmt = { cmd = "cargo fmt -- --check", glob = "*.rs" }
+rustfmt = { cmd = "cargo fmt", glob = "*.rs" }
 clippy = { cmd = "cargo clippy -- -D warnings", glob = "*.rs" }
 
 
 [dependencies]
-clap = { version = "4", default-features = false, features = ["derive", "error-context", "help", "usage", "std"] }
+clap = { version = "4", default-features = false, features = ["derive", "error-context", "help", "usage", "std", "color"] }
 anyhow = "1"
 anstyle = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml_edit = { version = "0.22", features = ["serde"] }
-dialoguer = { version = "0.11", default-features = false }
+toml_edit = { version = "0.25", features = ["serde"] }
+dialoguer = { version = "0.12", default-features = false }
 indexmap = { version = "2", features = ["serde"] }
 ctrlc = { version = "3", features = ["termination"] }
 

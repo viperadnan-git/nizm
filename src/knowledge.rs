@@ -7,17 +7,17 @@ pub struct ToolEntry {
 }
 
 pub static TOOLS: &[ToolEntry] = &[
-    // Python — formatters first, then linters
+    // Python
     ToolEntry {
         packages: &["black"],
         name: "black",
-        cmd: "black --check {staged_files}",
+        cmd: "black {staged_files}",
         glob: Some("*.py"),
     },
     ToolEntry {
         packages: &["ruff"],
         name: "ruff",
-        cmd: "ruff check {staged_files}",
+        cmd: "ruff check --fix {staged_files} && ruff format {staged_files}",
         glob: Some("*.py"),
     },
     ToolEntry {
@@ -26,23 +26,23 @@ pub static TOOLS: &[ToolEntry] = &[
         cmd: "mypy {staged_files}",
         glob: Some("*.py"),
     },
-    // JavaScript / TypeScript — formatters first, then linters
+    // JavaScript / TypeScript
     ToolEntry {
         packages: &["prettier"],
         name: "prettier",
-        cmd: "npx prettier --check {staged_files}",
+        cmd: "prettier --write {staged_files}",
         glob: None,
     },
     ToolEntry {
         packages: &["eslint"],
         name: "eslint",
-        cmd: "npx eslint {staged_files}",
+        cmd: "eslint --fix {staged_files}",
         glob: Some("*.{js,jsx,ts,tsx}"),
     },
     ToolEntry {
         packages: &["@biomejs/biome"],
         name: "biome",
-        cmd: "npx @biomejs/biome check {staged_files}",
+        cmd: "biome check --write {staged_files}",
         glob: None,
     },
 ];
@@ -52,7 +52,7 @@ pub static RUST_IMPLICIT: &[ToolEntry] = &[
     ToolEntry {
         packages: &[],
         name: "rustfmt",
-        cmd: "cargo fmt -- --check",
+        cmd: "cargo fmt",
         glob: Some("*.rs"),
     },
     ToolEntry {
@@ -63,6 +63,10 @@ pub static RUST_IMPLICIT: &[ToolEntry] = &[
     },
 ];
 
-pub fn lookup(dep_name: &str) -> Option<&'static ToolEntry> {
-    TOOLS.iter().find(|t| t.packages.contains(&dep_name))
+/// Return all matching tool entries for a given dependency name.
+pub fn lookup(dep_name: &str) -> Vec<&'static ToolEntry> {
+    TOOLS
+        .iter()
+        .filter(|t| t.packages.contains(&dep_name))
+        .collect()
 }

@@ -41,7 +41,7 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
             .default(true)
             .interact()?
         {
-            installer::install(repo_root, false)?;
+            installer::install(repo_root, Vec::new(), false)?;
             println!();
             return doctor(repo_root);
         }
@@ -70,7 +70,7 @@ pub fn doctor(repo_root: &Path) -> Result<bool> {
             .default(true)
             .interact()?
         {
-            installer::install(repo_root, false)?;
+            installer::install(repo_root, Vec::new(), false)?;
             println!();
             return doctor(repo_root);
         }

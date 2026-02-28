@@ -83,12 +83,14 @@ pub fn drop_rescue_ref() -> Result<()> {
 
 /// Stash unstaged changes, keeping the index (staged content) in the working tree.
 pub fn stash_keep_index() -> Result<()> {
-    let status = Command::new("git")
+    let output = Command::new("git")
         .args(["stash", "push", "--keep-index", "--include-untracked"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .context("git stash failed")?;
 
-    if !status.success() {
+    if !output.success() {
         anyhow::bail!("git stash push --keep-index failed");
     }
 
@@ -110,7 +112,11 @@ pub fn restore_unstaged() -> Result<()> {
     restore_untracked_from_stash()?;
 
     // Drop the stash (rescue ref still holds objects for recovery)
-    let _ = Command::new("git").args(["stash", "drop"]).status();
+    let _ = Command::new("git")
+        .args(["stash", "drop"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 
     if diff.stdout.is_empty() {
         return Ok(());

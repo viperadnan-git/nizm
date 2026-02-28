@@ -1,41 +1,47 @@
 use anyhow::{Context, Result};
 use dialoguer::{Confirm, MultiSelect};
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::{config, style};
 
 pub const HOOK_MARKER: &str = "# nizm-managed";
 
-pub fn install(repo_root: &Path, parallel: bool) -> Result<()> {
-    println!("scanning for manifests...");
-    let manifests = config::discover_manifests(repo_root)?;
+pub fn install(repo_root: &Path, explicit_configs: Vec<PathBuf>, parallel: bool) -> Result<()> {
+    let selected: Vec<PathBuf> = if !explicit_configs.is_empty() {
+        explicit_configs
+    } else {
+        println!("scanning for manifests...");
+        let manifests = config::discover_manifests(repo_root)?;
 
-    if manifests.is_empty() {
-        println!("no supported manifests found");
-        if Confirm::new()
-            .with_prompt("create a .nizm.toml?")
-            .default(true)
-            .interact()?
-        {
-            create_nizm_toml(repo_root)?;
-            println!("created .nizm.toml — add hooks and run `nizm install` again");
+        if manifests.is_empty() {
+            println!("no supported manifests found");
+            if Confirm::new()
+                .with_prompt("create a .nizm.toml?")
+                .default(true)
+                .interact()?
+            {
+                create_nizm_toml(repo_root)?;
+                println!("created .nizm.toml — add hooks and run `nizm install` again");
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
 
-    let labels: Vec<String> = manifests.iter().map(|p| p.display().to_string()).collect();
-    let selections = MultiSelect::new()
-        .with_prompt("select manifests (space = toggle, enter = confirm)")
-        .items(&labels)
-        .interact()?;
+        let labels: Vec<String> = manifests.iter().map(|p| p.display().to_string()).collect();
+        let selections = MultiSelect::new()
+            .with_prompt("select manifests (space = toggle, enter = confirm)")
+            .items(&labels)
+            .interact()?;
 
-    if selections.is_empty() {
-        println!("no manifests selected — aborting");
-        return Ok(());
-    }
-
-    let selected: Vec<_> = selections.iter().map(|&i| &manifests[i]).collect();
+        if selections.is_empty() {
+            println!("no manifests selected — aborting");
+            return Ok(());
+        }
+        selections
+            .into_iter()
+            .map(|i| manifests[i].clone())
+            .collect()
+    };
 
     for path in &selected {
         let cfg = config::parse_manifest(repo_root, path)?;
@@ -66,7 +72,8 @@ pub fn install(repo_root: &Path, parallel: bool) -> Result<()> {
         }
     }
 
-    bake_hook(repo_root, &selected, parallel)?;
+    let refs: Vec<&PathBuf> = selected.iter().collect();
+    bake_hook(repo_root, &refs, parallel)?;
     println!("{}", style::green("pre-commit hook installed"));
     Ok(())
 }

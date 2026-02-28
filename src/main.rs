@@ -43,6 +43,10 @@ enum Commands {
     },
     /// Install pre-commit hook
     Install {
+        /// Manifest paths to bake into hook (skips interactive selection)
+        #[arg(long)]
+        config: Vec<PathBuf>,
+
         /// Bake --parallel flag into hook script
         #[arg(long)]
         parallel: bool,
@@ -50,7 +54,11 @@ enum Commands {
     /// Diagnose pre-commit hook health
     Doctor,
     /// Scan dev-dependencies and suggest hooks
-    Init,
+    Init {
+        /// Hook names to add (skips interactive selection)
+        #[arg(value_name = "HOOK")]
+        hooks: Vec<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -73,8 +81,8 @@ fn try_main() -> Result<ExitCode> {
             hook,
             parallel,
         } => run(repo_root, config, hook, parallel),
-        Commands::Install { parallel } => {
-            installer::install(&repo_root, parallel)?;
+        Commands::Install { config, parallel } => {
+            installer::install(&repo_root, config, parallel)?;
             Ok(ExitCode::SUCCESS)
         }
         Commands::Doctor => {
@@ -85,8 +93,8 @@ fn try_main() -> Result<ExitCode> {
                 ExitCode::FAILURE
             })
         }
-        Commands::Init => {
-            init::init(&repo_root)?;
+        Commands::Init { hooks } => {
+            init::init(&repo_root, hooks)?;
             Ok(ExitCode::SUCCESS)
         }
     }
