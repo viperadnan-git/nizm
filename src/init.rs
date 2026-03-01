@@ -67,9 +67,10 @@ pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
         }
     }
 
-    // Deduplicate by (manifest, name)
+    // Deduplicate by (manifest, name), sort by depth (root first)
     let mut seen = HashSet::new();
     suggestions.retain(|s| seen.insert((s.manifest.clone(), s.entry.name)));
+    suggestions.sort_by_key(|s| s.manifest.components().count());
 
     if suggestions.is_empty() {
         if any_deps_found {
@@ -100,9 +101,23 @@ pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
         }
         indices
     } else {
+        let multiple_manifests = {
+            let mut seen = HashSet::new();
+            suggestions.iter().any(|s| !seen.insert(&s.manifest))
+        };
         let labels: Vec<String> = suggestions
             .iter()
-            .map(|s| s.entry.name.to_string())
+            .map(|s| {
+                if multiple_manifests {
+                    format!(
+                        "{} {}",
+                        s.entry.name,
+                        style::dim(&format!("({})", s.manifest.display()))
+                    )
+                } else {
+                    s.entry.name.to_string()
+                }
+            })
             .collect();
 
         let sel = MultiSelect::new()

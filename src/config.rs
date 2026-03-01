@@ -80,54 +80,35 @@ pub enum LenientManifest {
     Hooks(Vec<HookResult>),
 }
 
-const MAX_DEPTH: usize = 5;
-const SKIP_DIRS: &[&str] = &[
-    "node_modules",
-    ".git",
-    "target",
-    "dist",
-    "build",
-    ".venv",
-    "venv",
-    "__pycache__",
-    ".tox",
-];
 const MANIFEST_NAMES: &[&str] = &["pyproject.toml", "package.json", "Cargo.toml", ".nizm.toml"];
 
+/// Discover manifest files using `git ls-files`, respecting .gitignore at all levels.
 pub fn discover_manifests(repo_root: &Path) -> Result<Vec<PathBuf>> {
-    let mut found = Vec::new();
-    walk_manifests(repo_root, repo_root, &mut found, 0)?;
+    let output = std::process::Command::new("git")
+        .args(["ls-files", "--cached", "--others", "--exclude-standard"])
+        .current_dir(repo_root)
+        .output()
+        .context("failed to run git ls-files")?;
+
+    if !output.status.success() {
+        anyhow::bail!("git ls-files failed");
+    }
+
+    let stdout = String::from_utf8(output.stdout)?;
+    let mut found: Vec<PathBuf> = stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter(|path| {
+            Path::new(path)
+                .file_name()
+                .and_then(|f| f.to_str())
+                .is_some_and(|name| MANIFEST_NAMES.contains(&name))
+        })
+        .map(PathBuf::from)
+        .collect();
+
     found.sort();
     Ok(found)
-}
-
-fn walk_manifests(dir: &Path, root: &Path, found: &mut Vec<PathBuf>, depth: usize) -> Result<()> {
-    if depth > MAX_DEPTH {
-        return Ok(());
-    }
-
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return Ok(()),
-    };
-
-    for entry in entries.flatten() {
-        let ft = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        if ft.is_file() && MANIFEST_NAMES.contains(&name_str.as_ref()) {
-            found.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
-        } else if ft.is_dir() && !SKIP_DIRS.contains(&name_str.as_ref()) {
-            walk_manifests(&path, root, found, depth + 1)?;
-        }
-    }
-
-    Ok(())
 }
 
 pub fn parse_manifest(repo_root: &Path, manifest_path: &Path) -> Result<ManifestConfig> {

@@ -45,7 +45,7 @@ pub static TOOLS: &[ToolEntry] = &[
         packages: &["@biomejs/biome"],
         name: "biome",
         cmd: "biome check --write {staged_files}",
-        glob: None,
+        glob: Some("*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc,css}"),
     },
 ];
 
