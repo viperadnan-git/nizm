@@ -3,43 +3,53 @@ use dialoguer::Confirm;
 use serde::Serialize;
 use std::path::Path;
 
-use crate::{config, installer, style};
+use crate::{
+    config::{self, HookType},
+    installer, style,
+};
+
+const ALL_HOOK_TYPES: &[HookType] = &[
+    HookType::PreCommit,
+    HookType::PrePush,
+    HookType::CommitMsg,
+    HookType::PrepareCommitMsg,
+];
 
 pub fn uninstall(repo_root: &Path, purge: bool) -> Result<()> {
-    let hook_path = repo_root.join(".git/hooks/pre-commit");
+    let mut removed_any = false;
 
-    if !hook_path.exists() {
-        println!(
-            "{}",
-            style::yellow("no pre-commit hook found — nothing to do")
-        );
-        return Ok(());
+    for ht in ALL_HOOK_TYPES {
+        let hook_path = repo_root.join(format!(".git/hooks/{}", ht.as_str()));
+        if !hook_path.exists() {
+            continue;
+        }
+
+        let content = std::fs::read_to_string(&hook_path)?;
+        if !installer::is_nizm_managed(&content) {
+            continue;
+        }
+
+        let hook_name = ht.as_str();
+        let remaining = remove_block(&content);
+
+        if remaining.trim().is_empty() || remaining.trim() == "#!/bin/sh" {
+            std::fs::remove_file(&hook_path)
+                .with_context(|| format!("failed to remove {hook_name} hook"))?;
+            println!("{}", style::green(&format!("{hook_name} hook removed")));
+        } else {
+            std::fs::write(&hook_path, &remaining)
+                .with_context(|| format!("failed to update {hook_name} hook"))?;
+            println!(
+                "{}",
+                style::green(&format!("nizm block removed from {hook_name} hook"))
+            );
+        }
+        removed_any = true;
     }
 
-    let content = std::fs::read_to_string(&hook_path)?;
-
-    if !installer::is_nizm_managed(&content) {
-        println!(
-            "{}",
-            style::yellow("pre-commit hook exists but has no nizm block — nothing to remove")
-        );
+    if !removed_any {
+        println!("{}", style::yellow("no nizm hooks found — nothing to do"));
         return Ok(());
-    }
-
-    // Remove nizm block from hook
-    let remaining = remove_block(&content);
-
-    if remaining.trim().is_empty() || remaining.trim() == "#!/bin/sh" {
-        // Hook only had nizm content — delete the file
-        std::fs::remove_file(&hook_path).context("failed to remove pre-commit hook")?;
-        println!("{}", style::green("pre-commit hook removed"));
-    } else {
-        // Other hooks exist — keep the file, remove only nizm block
-        std::fs::write(&hook_path, &remaining).context("failed to update pre-commit hook")?;
-        println!(
-            "{}",
-            style::green("nizm block removed from pre-commit hook")
-        );
     }
 
     // Purge hook config from manifests

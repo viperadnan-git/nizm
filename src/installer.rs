@@ -4,7 +4,11 @@ use dialoguer::{Confirm, MultiSelect};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::{config, style};
+use crate::{
+    config::{self, HookType},
+    style,
+};
+use std::collections::HashSet;
 
 pub const BLOCK_START: &str = "# nizm-start";
 pub const BLOCK_END: &str = "# nizm-end";
@@ -41,22 +45,28 @@ pub fn install(
             return Ok(());
         }
 
-        let labels: Vec<String> = manifests.iter().map(|p| p.display().to_string()).collect();
-        let selections = MultiSelect::new()
-            .with_prompt("select manifests (space = toggle, enter = confirm)")
-            .items(&labels)
-            .interact()?;
+        if manifests.len() == 1 {
+            manifests
+        } else {
+            let labels: Vec<String> = manifests.iter().map(|p| p.display().to_string()).collect();
+            let selections = MultiSelect::new()
+                .with_prompt("select manifests (space = toggle, enter = confirm)")
+                .items(&labels)
+                .interact()?;
 
-        if selections.is_empty() {
-            println!("no manifests selected — aborting");
-            return Ok(());
+            if selections.is_empty() {
+                println!("no manifests selected — aborting");
+                return Ok(());
+            }
+            selections
+                .into_iter()
+                .map(|i| manifests[i].clone())
+                .collect()
         }
-        selections
-            .into_iter()
-            .map(|i| manifests[i].clone())
-            .collect()
     };
 
+    // Collect hook types present across selected manifests
+    let mut hook_types = HashSet::new();
     for path in &selected {
         let cfg = config::parse_manifest(repo_root, path)?;
         if cfg.hooks.is_empty() {
@@ -68,16 +78,41 @@ pub fn install(
         } else {
             let names: Vec<_> = cfg.hooks.iter().map(|h| h.name.as_str()).collect();
             println!("  {} — [{}]", path.display(), names.join(", "));
+            for hook in &cfg.hooks {
+                hook_types.insert(hook.hook_type);
+            }
         }
     }
 
-    let hook_path = repo_root.join(".git/hooks/pre-commit");
-    let block = generate_block(&selected, parallel);
+    if hook_types.is_empty() {
+        println!("no hooks configured — run `nizm init` to set up hooks");
+        return Ok(());
+    }
+
+    // Install a hook file for each discovered type
+    for ht in &hook_types {
+        install_hook_file(repo_root, &selected, *ht, parallel, force, interactive)?;
+    }
+
+    Ok(())
+}
+
+fn install_hook_file(
+    repo_root: &Path,
+    manifests: &[PathBuf],
+    hook_type: HookType,
+    parallel: bool,
+    force: bool,
+    interactive: bool,
+) -> Result<()> {
+    let hook_name = hook_type.as_str();
+    let hook_path = repo_root.join(format!(".git/hooks/{hook_name}"));
+    let block = generate_block(manifests, parallel, hook_type);
 
     if !hook_path.exists() {
         std::fs::create_dir_all(hook_path.parent().unwrap())?;
         write_hook(&hook_path, &format!("#!/bin/sh\n{block}\n"))?;
-        println!("{}", style::green("pre-commit hook installed"));
+        println!("{}", style::green(&format!("{hook_name} hook installed")));
         return Ok(());
     }
 
@@ -85,21 +120,27 @@ pub fn install(
 
     if is_nizm_managed(&content) {
         if blocks_match(&content, &block) {
-            println!("{}", style::green("pre-commit hook already up to date"));
+            println!(
+                "{}",
+                style::green(&format!("{hook_name} hook already up to date"))
+            );
             return Ok(());
         }
 
         if has_custom_block_content(&content) {
-            require_overwrite_consent("nizm block has custom modifications", force, interactive)?;
+            require_overwrite_consent(
+                &format!("{hook_name}: nizm block has custom modifications"),
+                force,
+                interactive,
+            )?;
         } else {
-            println!("updating nizm block");
+            println!("updating {hook_name} nizm block");
         }
 
         let new_content = replace_block(&content, &block)?;
         write_hook(&hook_path, &new_content)?;
-        println!("{}", style::green("pre-commit hook updated"));
+        println!("{}", style::green(&format!("{hook_name} hook updated")));
     } else {
-        // Foreign hook — append nizm block
         let mut new_content = content;
         if !new_content.ends_with('\n') {
             new_content.push('\n');
@@ -108,7 +149,10 @@ pub fn install(
         new_content.push_str(&block);
         new_content.push('\n');
         write_hook(&hook_path, &new_content)?;
-        println!("{} appended to existing hook", style::green("nizm block"));
+        println!(
+            "{} appended to existing {hook_name} hook",
+            style::green("nizm block")
+        );
     }
 
     Ok(())
@@ -133,21 +177,27 @@ fn require_overwrite_consent(message: &str, force: bool, interactive: bool) -> R
     Ok(())
 }
 
-fn generate_block(manifests: &[PathBuf], parallel: bool) -> String {
+fn generate_block(manifests: &[PathBuf], parallel: bool, hook_type: HookType) -> String {
     let config_args: String = manifests
         .iter()
         .map(|p| format!(" --config {}", p.display()))
         .collect();
 
     let parallel_flag = if parallel { " --parallel" } else { "" };
+    let type_flag = if hook_type == HookType::PreCommit {
+        String::new()
+    } else {
+        format!(" --hook-type {}", hook_type)
+    };
 
     format!(
         "{BLOCK_START}\n\
+         # auto-generated by nizm — do not edit\n\
          if ! command -v nizm >/dev/null 2>&1; then\n\
          \x20 echo \"nizm: not found in PATH — install it or run: cargo install nizm\" >&2\n\
          \x20 exit 1\n\
          fi\n\
-         nizm run{config_args}{parallel_flag} || exit $?\n\
+         nizm run{config_args}{parallel_flag}{type_flag} || exit $?\n\
          {BLOCK_END}"
     )
 }

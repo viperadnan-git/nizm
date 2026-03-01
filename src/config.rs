@@ -3,10 +3,46 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HookType {
+    PreCommit,
+    PrePush,
+    CommitMsg,
+    PrepareCommitMsg,
+}
+
+impl HookType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "pre-commit" => Some(Self::PreCommit),
+            "pre-push" => Some(Self::PrePush),
+            "commit-msg" => Some(Self::CommitMsg),
+            "prepare-commit-msg" => Some(Self::PrepareCommitMsg),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PreCommit => "pre-commit",
+            Self::PrePush => "pre-push",
+            Self::CommitMsg => "commit-msg",
+            Self::PrepareCommitMsg => "prepare-commit-msg",
+        }
+    }
+}
+
+impl std::fmt::Display for HookType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct HookConfig {
     pub cmd: String,
     pub glob: Option<String>,
+    pub r#type: Option<String>,
 }
 
 #[derive(Debug)]
@@ -14,12 +50,27 @@ pub struct Hook {
     pub name: String,
     pub cmd: String,
     pub glob: Option<String>,
+    pub hook_type: HookType,
 }
 
 #[derive(Debug)]
 pub struct ManifestConfig {
     pub path: PathBuf,
     pub hooks: Vec<Hook>,
+}
+
+/// Per-hook parse result for doctor's lenient parsing.
+#[derive(Debug)]
+pub enum HookResult {
+    Ok(Hook),
+    Err { name: String, error: String },
+}
+
+/// Manifest parsed leniently — file-level error or per-hook results.
+#[derive(Debug)]
+pub enum LenientManifest {
+    FileError(String),
+    Hooks(Vec<HookResult>),
 }
 
 const MAX_DEPTH: usize = 5;
@@ -88,10 +139,23 @@ pub fn parse_manifest(repo_root: &Path, manifest_path: &Path) -> Result<Manifest
 
     let hooks = hook_map
         .into_iter()
-        .map(|(name, cfg)| Hook {
-            name,
-            cmd: cfg.cmd,
-            glob: cfg.glob,
+        .map(|(name, cfg)| {
+            let hook_type = cfg
+                .r#type
+                .as_deref()
+                .map(|t| {
+                    HookType::from_str(t).unwrap_or_else(|| {
+                        eprintln!("warning: unknown hook type '{t}' for '{name}', defaulting to pre-commit");
+                        HookType::PreCommit
+                    })
+                })
+                .unwrap_or(HookType::PreCommit);
+            Hook {
+                name,
+                cmd: cfg.cmd,
+                glob: cfg.glob,
+                hook_type,
+            }
         })
         .collect();
 
@@ -99,6 +163,102 @@ pub fn parse_manifest(repo_root: &Path, manifest_path: &Path) -> Result<Manifest
         path: manifest_path.to_path_buf(),
         hooks,
     })
+}
+
+/// Parse a manifest leniently — per-hook errors instead of failing the whole file.
+pub fn parse_manifest_lenient(repo_root: &Path, manifest_path: &Path) -> LenientManifest {
+    let full_path = repo_root.join(manifest_path);
+    let filename = match full_path.file_name().and_then(|f| f.to_str()) {
+        Some(f) => f,
+        None => return LenientManifest::FileError("invalid manifest path".to_string()),
+    };
+
+    let content = match std::fs::read_to_string(&full_path) {
+        Ok(c) => c,
+        Err(e) => return LenientManifest::FileError(e.to_string()),
+    };
+
+    let raw_hooks = match filename {
+        "pyproject.toml" => parse_raw_toml_hooks(&content, &["tool", "nizm", "hooks"]),
+        "Cargo.toml" => parse_raw_toml_hooks(&content, &["package", "metadata", "nizm", "hooks"]),
+        ".nizm.toml" => parse_raw_toml_hooks(&content, &["hooks"]),
+        "package.json" => parse_raw_json_hooks(&content),
+        _ => return LenientManifest::FileError(format!("unsupported manifest: {filename}")),
+    };
+
+    let entries = match raw_hooks {
+        Some(entries) => entries,
+        None => return LenientManifest::Hooks(Vec::new()),
+    };
+
+    let results = entries
+        .into_iter()
+        .map(
+            |(name, value)| match serde_json::from_value::<HookConfig>(value) {
+                Ok(cfg) => {
+                    let hook_type = cfg
+                        .r#type
+                        .as_deref()
+                        .map(|t| HookType::from_str(t).unwrap_or(HookType::PreCommit))
+                        .unwrap_or(HookType::PreCommit);
+                    HookResult::Ok(Hook {
+                        name,
+                        cmd: cfg.cmd,
+                        glob: cfg.glob,
+                        hook_type,
+                    })
+                }
+                Err(e) => HookResult::Err {
+                    name,
+                    error: e.to_string(),
+                },
+            },
+        )
+        .collect();
+
+    LenientManifest::Hooks(results)
+}
+
+/// Extract hooks table as raw entries from TOML, navigating a key path.
+/// Each entry is serialized back to a TOML string and deserialized individually.
+fn parse_raw_toml_hooks(
+    content: &str,
+    key_path: &[&str],
+) -> Option<Vec<(String, serde_json::Value)>> {
+    let doc: toml_edit::DocumentMut = content.parse().ok()?;
+    let mut table = doc.as_table() as &dyn toml_edit::TableLike;
+    for &key in key_path {
+        table = table.get(key)?.as_table_like()?;
+    }
+    let mut entries = Vec::new();
+    for (key, item) in table.iter() {
+        // Wrap each hook value as `x = <value>` and parse via toml_edit::de
+        let wrapped = format!("x = {item}");
+        match toml_edit::de::from_str::<std::collections::HashMap<String, serde_json::Value>>(
+            &wrapped,
+        ) {
+            Ok(mut map) => {
+                if let Some(v) = map.remove("x") {
+                    entries.push((key.to_string(), v));
+                }
+            }
+            Err(e) => {
+                // Push a value that will fail HookConfig deserialization with the original error
+                entries.push((
+                    key.to_string(),
+                    serde_json::json!({"__parse_error": e.to_string()}),
+                ));
+            }
+        }
+    }
+    Some(entries)
+}
+
+/// Extract hooks from JSON, per-entry.
+fn parse_raw_json_hooks(content: &str) -> Option<Vec<(String, serde_json::Value)>> {
+    let root: serde_json::Value = serde_json::from_str(content).ok()?;
+    let hooks = root.get("nizm")?.get("hooks")?.as_object()?;
+    Some(hooks.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
 }
 
 // --- TOML parsers ---

@@ -51,14 +51,14 @@ pub static TOOLS: &[ToolEntry] = &[
 pub static RUST_IMPLICIT: &[ToolEntry] = &[
     ToolEntry {
         packages: &[],
-        name: "rustfmt",
-        cmd: "cargo fmt",
+        name: "clippy",
+        cmd: "cargo clippy --fix --allow-dirty -- -D warnings",
         glob: Some("*.rs"),
     },
     ToolEntry {
         packages: &[],
-        name: "clippy",
-        cmd: "cargo clippy -- -D warnings",
+        name: "rustfmt",
+        cmd: "cargo fmt",
         glob: Some("*.rs"),
     },
 ];

@@ -17,6 +17,24 @@ pub fn repo_root() -> Result<PathBuf> {
     Ok(PathBuf::from(root))
 }
 
+pub fn tracked_files() -> Result<Vec<String>> {
+    let output = Command::new("git")
+        .args(["ls-files"])
+        .output()
+        .context("failed to run git ls-files")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git ls-files failed: {stderr}");
+    }
+
+    Ok(String::from_utf8(output.stdout)?
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect())
+}
+
 pub fn staged_files() -> Result<Vec<String>> {
     let output = Command::new("git")
         .args(["diff", "--cached", "--name-only", "--diff-filter=ACMR"])
@@ -140,8 +158,13 @@ pub fn restore_unstaged() -> Result<()> {
             let _ = Command::new("git").arg("add").args(&conflicted).status();
 
             eprintln!(
-                "nizm: {} file(s) had conflicting unstaged changes — keeping hook-modified content",
-                conflicted.len()
+                "nizm: {} {} had conflicting unstaged changes — keeping hook-modified content",
+                conflicted.len(),
+                if conflicted.len() == 1 {
+                    "file"
+                } else {
+                    "files"
+                }
             );
             eprintln!("nizm: recover original state: git stash apply refs/nizm-backup");
         }

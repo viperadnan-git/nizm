@@ -13,6 +13,7 @@ const RED_BOLD: Style = Style::new()
     .effects(Effects::BOLD);
 const YELLOW: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow)));
 const BOLD: Style = Style::new().effects(Effects::BOLD);
+const DIM: Style = Style::new().effects(Effects::DIMMED);
 
 pub fn green(s: &str) -> String {
     styled(s, GREEN)
@@ -28,6 +29,10 @@ pub fn yellow(s: &str) -> String {
 
 pub fn bold(s: &str) -> String {
     styled(s, BOLD)
+}
+
+pub fn dim(s: &str) -> String {
+    styled(s, DIM)
 }
 
 fn styled(s: &str, style: Style) -> String {

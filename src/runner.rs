@@ -1,42 +1,59 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
-use crate::{config::Hook, style};
+use crate::config::Hook;
 
 /// Execute a hook with scope filtering and CWD isolation.
+/// Returns (exit_code, duration, scoped_file_count).
 pub fn exec_hook(
     hook: &Hook,
     staged_files: &[String],
     manifest_dir: &Path,
     abs_cwd: &Path,
-) -> Result<i32> {
+) -> Result<(i32, Duration, usize)> {
     let scoped = scope_files(staged_files, manifest_dir, hook.glob.as_deref());
 
     if scoped.is_empty() {
-        return Ok(0);
+        return Ok((0, Duration::ZERO, 0));
     }
 
-    println!("  {} ({} file(s))", style::bold(&hook.name), scoped.len());
-    exec_cmd(&hook.cmd, &scoped, Some(abs_cwd))
+    let start = Instant::now();
+    let code = exec_cmd(&hook.cmd, &scoped, Some(abs_cwd))?;
+    let elapsed = start.elapsed();
+
+    Ok((code, elapsed, scoped.len()))
 }
 
 /// Execute a hook capturing stdout/stderr (for parallel mode).
+/// Returns (exit_code, duration, scoped_file_count, stdout, stderr).
 pub fn exec_hook_captured(
     hook: &Hook,
     staged_files: &[String],
     manifest_dir: &Path,
     abs_cwd: &Path,
-) -> Result<(i32, String, String)> {
+) -> Result<(i32, Duration, usize, String, String)> {
     let scoped = scope_files(staged_files, manifest_dir, hook.glob.as_deref());
 
     if scoped.is_empty() {
-        return Ok((0, String::new(), String::new()));
+        return Ok((0, Duration::ZERO, 0, String::new(), String::new()));
     }
 
-    let header = format!("  {} ({} file(s))\n", style::bold(&hook.name), scoped.len());
+    let start = Instant::now();
     let (code, stdout, stderr) = run_cmd(&hook.cmd, &scoped, Some(abs_cwd), true)?;
-    Ok((code, format!("{header}{stdout}"), stderr))
+    let elapsed = start.elapsed();
+
+    Ok((code, elapsed, scoped.len(), stdout, stderr))
+}
+
+pub fn format_duration(d: Duration) -> String {
+    let ms = d.as_millis();
+    if ms < 1000 {
+        format!("{ms}ms")
+    } else {
+        format!("{:.1}s", d.as_secs_f64())
+    }
 }
 
 /// Execute a raw command string.

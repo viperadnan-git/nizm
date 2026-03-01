@@ -10,8 +10,8 @@ keywords = ["git", "hooks", "pre-commit", "linter", "formatter"]
 categories = ["development-tools", "command-line-utilities"]
 
 [package.metadata.nizm.hooks]
+clippy = { cmd = "cargo clippy --fix --allow-dirty -- -D warnings", glob = "*.rs" }
 rustfmt = { cmd = "cargo fmt", glob = "*.rs" }
-clippy = { cmd = "cargo clippy -- -D warnings", glob = "*.rs" }
 
 
 [dependencies]
