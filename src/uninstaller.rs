@@ -3,9 +3,7 @@ use dialoguer::Confirm;
 use serde::Serialize;
 use std::path::Path;
 
-use crate::{config, installer, style};
-
-use config::ALL_HOOK_TYPES;
+use crate::{config, config::ALL_HOOK_TYPES, config::detect_json_indent, installer, style};
 
 pub fn uninstall(repo_root: &Path, purge: bool) -> Result<()> {
     let mut removed_any = false;
@@ -223,5 +221,3 @@ fn purge_json(file_path: &Path) -> Result<bool> {
 
     Ok(true)
 }
-
-use crate::config::detect_json_indent;

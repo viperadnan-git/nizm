@@ -3,7 +3,7 @@ use dialoguer::MultiSelect;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::{config, installer, knowledge, style};
+use crate::{config, config::detect_json_indent, installer, knowledge, style};
 
 pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
     let manifests = config::discover_manifests(repo_root)?;
@@ -35,7 +35,7 @@ pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
             .map(|c| c.hooks.into_iter().map(|h| h.name).collect())
             .unwrap_or_default();
 
-        let deps = read_devdeps(filename, &content);
+        let (deps, is_cargo_package) = read_devdeps(filename, &content);
         if !deps.is_empty() {
             any_deps_found = true;
         }
@@ -52,7 +52,7 @@ pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
         }
 
         // Rust implicit tools (clippy, rustfmt)
-        if filename == "Cargo.toml" && has_cargo_package(&content) {
+        if is_cargo_package {
             any_deps_found = true;
             for entry in knowledge::RUST_IMPLICIT {
                 if !existing.contains(entry.name) {
@@ -188,12 +188,13 @@ struct Suggestion {
 
 // --- Dev-dependency readers ---
 
-fn read_devdeps(filename: &str, content: &str) -> Vec<String> {
+/// Returns (dev_deps, is_cargo_package).
+fn read_devdeps(filename: &str, content: &str) -> (Vec<String>, bool) {
     match filename {
-        "pyproject.toml" => read_pyproject_devdeps(content),
-        "package.json" => read_packagejson_devdeps(content),
+        "pyproject.toml" => (read_pyproject_devdeps(content), false),
+        "package.json" => (read_packagejson_devdeps(content), false),
         "Cargo.toml" => read_cargo_devdeps(content),
-        _ => Vec::new(),
+        _ => (Vec::new(), false),
     }
 }
 
@@ -259,24 +260,21 @@ fn read_packagejson_devdeps(content: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn read_cargo_devdeps(content: &str) -> Vec<String> {
+/// Returns (dev_deps, has_package_section).
+fn read_cargo_devdeps(content: &str) -> (Vec<String>, bool) {
     let doc: toml_edit::DocumentMut = match content.parse() {
         Ok(d) => d,
-        Err(_) => return Vec::new(),
+        Err(_) => return (Vec::new(), false),
     };
 
-    doc.get("dev-dependencies")
+    let deps = doc
+        .get("dev-dependencies")
         .and_then(|d| d.as_table())
         .map(|t| t.iter().map(|(k, _)| k.to_string()).collect())
-        .unwrap_or_default()
-}
+        .unwrap_or_default();
+    let has_package = doc.get("package").is_some();
 
-fn has_cargo_package(content: &str) -> bool {
-    content
-        .parse::<toml_edit::DocumentMut>()
-        .ok()
-        .and_then(|doc| doc.get("package").map(|_| true))
-        .unwrap_or(false)
+    (deps, has_package)
 }
 
 /// Strip version specifiers from a Python dependency string.
@@ -432,8 +430,6 @@ fn inject_json(file_path: &Path, entry: &knowledge::ToolEntry) -> Result<()> {
 
     Ok(())
 }
-
-use crate::config::detect_json_indent;
 
 /// Find the byte position of the closing `}` for a JSON object at the given key path.
 /// Empty path = root object.

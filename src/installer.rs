@@ -14,8 +14,8 @@ pub const BLOCK_START: &str = "# nizm-start";
 pub const BLOCK_END: &str = "# nizm-end";
 
 pub fn is_nizm_managed(content: &str) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-    lines.iter().any(|l| l.trim() == BLOCK_START) && lines.iter().any(|l| l.trim() == BLOCK_END)
+    content.lines().any(|l| l.trim() == BLOCK_START)
+        && content.lines().any(|l| l.trim() == BLOCK_END)
 }
 
 pub fn install(
@@ -202,63 +202,49 @@ fn generate_block(manifests: &[PathBuf], parallel: bool, hook_type: HookType) ->
     )
 }
 
-fn blocks_match(content: &str, expected_block: &str) -> bool {
-    let existing = match extract_block_lines(content) {
-        Some(lines) => lines,
-        None => return false,
-    };
-    let expected: Vec<&str> = expected_block.lines().map(|l| l.trim()).collect();
-    existing == expected
-}
-
-fn extract_block_lines(content: &str) -> Option<Vec<&str>> {
-    let lines: Vec<&str> = content.lines().collect();
+/// Find the line indices of the nizm block markers.
+fn find_block_bounds(lines: &[&str]) -> Option<(usize, usize)> {
     let start = lines.iter().position(|l| l.trim() == BLOCK_START)?;
     let end = lines
         .iter()
         .rposition(|l| l.trim() == BLOCK_END)
         .filter(|&e| e > start)?;
-    Some(lines[start..=end].iter().map(|l| l.trim()).collect())
+    Some((start, end))
+}
+
+fn blocks_match(content: &str, expected_block: &str) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+    let (start, end) = match find_block_bounds(&lines) {
+        Some(b) => b,
+        None => return false,
+    };
+    let existing: Vec<&str> = lines[start..=end].iter().map(|l| l.trim()).collect();
+    let expected: Vec<&str> = expected_block.lines().map(|l| l.trim()).collect();
+    existing == expected
 }
 
 fn has_custom_block_content(content: &str) -> bool {
     let lines: Vec<&str> = content.lines().collect();
-    let start = match lines.iter().position(|l| l.trim() == BLOCK_START) {
-        Some(i) => i,
+    let (start, end) = match find_block_bounds(&lines) {
+        Some(b) => b,
         None => return false,
     };
-    let end = match lines.iter().rposition(|l| l.trim() == BLOCK_END) {
-        Some(i) if i > start => i,
-        _ => return false,
-    };
 
-    for line in &lines[start + 1..end] {
+    lines[start + 1..end].iter().any(|line| {
         let trimmed = line.trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with("if ! command -v nizm")
-            || trimmed.starts_with("echo \"nizm:")
-            || trimmed == "exit 1"
-            || trimmed == "fi"
-            || trimmed.starts_with("nizm run")
-        {
-            continue;
-        }
-        return true;
-    }
-    false
+        !trimmed.is_empty()
+            && !trimmed.starts_with("if ! command -v nizm")
+            && !trimmed.starts_with("echo \"nizm:")
+            && trimmed != "exit 1"
+            && trimmed != "fi"
+            && !trimmed.starts_with("nizm run")
+            && !trimmed.starts_with('#')
+    })
 }
 
 fn replace_block(content: &str, new_block: &str) -> Result<String> {
     let lines: Vec<&str> = content.lines().collect();
-    let start = lines
-        .iter()
-        .position(|l| l.trim() == BLOCK_START)
-        .context("block start marker not found")?;
-    let end = lines
-        .iter()
-        .rposition(|l| l.trim() == BLOCK_END)
-        .filter(|&e| e > start)
-        .context("block end marker not found")?;
+    let (start, end) = find_block_bounds(&lines).context("nizm block markers not found")?;
 
     let mut result: Vec<&str> = Vec::new();
     result.extend_from_slice(&lines[..start]);
