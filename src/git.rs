@@ -3,6 +3,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use crate::style;
+
 pub fn repo_root() -> Result<PathBuf> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -61,6 +63,11 @@ fn unstaged_files() -> Result<std::collections::HashSet<String>> {
         .output()
         .context("git diff failed")?;
 
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git diff --name-only failed: {stderr}");
+    }
+
     let stdout = String::from_utf8(output.stdout)?;
     Ok(stdout
         .lines()
@@ -106,17 +113,49 @@ pub fn drop_rescue_ref() -> Result<()> {
     Ok(())
 }
 
+pub fn rescue_ref_exists() -> bool {
+    Command::new("git")
+        .args(["rev-parse", "--verify", "--quiet", "refs/nizm-backup"])
+        .stdout(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+pub fn apply_rescue_ref() -> Result<()> {
+    let output = Command::new("git")
+        .args(["stash", "apply", "refs/nizm-backup"])
+        .output()
+        .context("failed to apply rescue ref")?;
+
+    if output.status.success() {
+        drop_rescue_ref()?;
+        return Ok(());
+    }
+
+    // Check if apply created conflicts (partial apply) vs rejected entirely
+    let conflicts = conflicted_files().unwrap_or_default();
+    if !conflicts.is_empty() {
+        // Partially applied with conflicts — drop ref, user resolves manually
+        drop_rescue_ref()?;
+        anyhow::bail!("recovery applied with conflicts — resolve them manually");
+    }
+
+    // Apply rejected entirely (e.g. dirty working tree) — keep ref for retry
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    anyhow::bail!("recovery failed: {}", stderr.trim());
+}
+
 /// Stash unstaged changes, keeping the index (staged content) in the working tree.
 pub fn stash_keep_index() -> Result<()> {
     let output = Command::new("git")
         .args(["stash", "push", "--keep-index", "--include-untracked"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .output()
         .context("git stash failed")?;
 
-    if !output.success() {
-        anyhow::bail!("git stash push --keep-index failed");
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git stash push --keep-index failed: {stderr}");
     }
 
     Ok(())
@@ -174,7 +213,11 @@ pub fn restore_unstaged() -> Result<bool> {
                     "files"
                 }
             );
-            eprintln!("nizm: recover original state: git stash apply refs/nizm-backup");
+            eprintln!(
+                "{} recover original state: {}",
+                style::bold("nizm:"),
+                style::bold("nizm recover")
+            );
             return Ok(true);
         }
     }
@@ -191,27 +234,30 @@ fn restore_untracked_from_stash() -> Result<()> {
         return Ok(());
     }
 
+    let root = repo_root()?;
+
     let list = Command::new("git")
         .args(["ls-tree", "-r", "--name-only", "stash@{0}^3"])
+        .current_dir(&root)
         .output()?;
 
     let files = String::from_utf8(list.stdout)?;
     for file in files.lines().filter(|l| !l.is_empty()) {
-        if std::path::Path::new(file).exists() {
+        let abs = root.join(file);
+        if abs.exists() {
             continue;
         }
 
         let content = Command::new("git")
             .args(["show", &format!("stash@{{0}}^3:{file}")])
+            .current_dir(&root)
             .output()?;
 
         if content.status.success() {
-            if let Some(parent) = std::path::Path::new(file).parent()
-                && !parent.as_os_str().is_empty()
-            {
+            if let Some(parent) = abs.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(file, &content.stdout)?;
+            std::fs::write(&abs, &content.stdout)?;
         }
     }
 

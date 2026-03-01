@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 fn use_color() -> bool {
     static COLOR: OnceLock<bool> = OnceLock::new();
-    *COLOR.get_or_init(|| std::io::stdout().is_terminal())
+    *COLOR.get_or_init(|| std::env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal())
 }
 
 const GREEN: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green)));

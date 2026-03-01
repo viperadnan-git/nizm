@@ -82,6 +82,8 @@ enum Commands {
         #[arg(long)]
         purge: bool,
     },
+    /// Restore working tree from a failed stash recovery
+    Recover,
 }
 
 fn main() -> ExitCode {
@@ -138,6 +140,18 @@ fn try_main() -> Result<ExitCode> {
             uninstaller::uninstall(&repo_root, purge)?;
             Ok(ExitCode::SUCCESS)
         }
+        Commands::Recover => {
+            if !git::rescue_ref_exists() {
+                println!("no rescue snapshot found — nothing to recover");
+                return Ok(ExitCode::SUCCESS);
+            }
+            git::apply_rescue_ref()?;
+            println!(
+                "{}",
+                style::green("working tree restored from rescue snapshot")
+            );
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 
@@ -145,14 +159,16 @@ fn ls(repo_root: &Path) -> Result<()> {
     let manifests = config::discover_manifests(repo_root)?;
 
     // Collect all manifests with their hooks
-    let parsed: Vec<_> = manifests
-        .iter()
-        .filter_map(|path| {
-            config::parse_manifest(repo_root, path)
-                .ok()
-                .filter(|c| !c.hooks.is_empty())
-        })
-        .collect();
+    let mut parsed: Vec<config::ManifestConfig> = Vec::new();
+    for path in &manifests {
+        match config::parse_manifest(repo_root, path) {
+            Ok(c) if !c.hooks.is_empty() => parsed.push(c),
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("  {} {} — {}", style::yellow("warning:"), path.display(), e);
+            }
+        }
+    }
 
     if parsed.is_empty() {
         println!("no hooks configured");

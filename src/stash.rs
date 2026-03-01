@@ -73,12 +73,20 @@ impl Drop for StashGuard {
                 }
                 Err(e) => {
                     eprintln!("{} failed to restore stash: {e}", style::red_bold("nizm:"));
-                    eprintln!("nizm: rescue snapshot: git stash apply refs/nizm-backup");
+                    eprintln!(
+                        "{} rescue snapshot available — restore with:",
+                        style::bold("nizm:")
+                    );
+                    eprintln!("  {}", style::bold("git stash apply refs/nizm-backup"));
                 }
             });
             if result.is_err() {
                 eprintln!("{} panic during stash restore", style::red_bold("nizm:"));
-                eprintln!("nizm: rescue snapshot: git stash apply refs/nizm-backup");
+                eprintln!(
+                    "{} rescue snapshot available — restore with:",
+                    style::bold("nizm:")
+                );
+                eprintln!("  {}", style::bold("git stash apply refs/nizm-backup"));
             }
         }
     }

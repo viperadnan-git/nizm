@@ -125,10 +125,11 @@ test  = { cmd = "make test" }
 
 ### Hook fields
 
-| Field  | Required | Description                                                          |
-| :----- | :------- | :------------------------------------------------------------------- |
-| `cmd`  | yes      | Shell command to run. Use `{staged_files}` to receive the file list. |
-| `glob` | no       | Filter staged files by pattern (`*.py`, `*.{js,ts}`, `src/**/*.rs`). |
+| Field  | Required | Description                                                           |
+| :----- | :------- | :-------------------------------------------------------------------- |
+| `cmd`  | yes      | Shell command to run. Use `{staged_files}` to receive the file list.  |
+| `glob` | no       | Filter staged files by pattern (`*.py`, `*.{js,ts}`, `src/**/*.rs`).  |
+| `type` | no       | Git hook type: `pre-commit` (default), `pre-push`, `commit-msg`, `prepare-commit-msg`. |
 
 > [!TIP]
 > If `{staged_files}` is omitted, the command runs unconditionally when any file in scope is staged.
@@ -218,6 +219,17 @@ Cargo.toml
   rustfmt  cargo fmt                                        *.rs
 ```
 
+### `nizm recover`
+
+Restores your working tree from a rescue snapshot after a failed stash recovery.
+
+```console
+$ nizm recover
+working tree restored from rescue snapshot
+```
+
+If recovery produces conflicts, resolve them manually — the rescue ref is cleaned up automatically.
+
 ### `nizm uninstall`
 
 Removes nizm hook blocks from `.git/hooks/`. Use `--purge` to also strip hook config from manifests.
@@ -227,6 +239,13 @@ $ nizm uninstall --purge
 pre-commit hook removed
   cleaned Cargo.toml
 ```
+
+### Environment variables
+
+| Variable    | Description                                          |
+| :---------- | :--------------------------------------------------- |
+| `NIZM_SKIP` | Comma-separated hook names to skip (e.g. `mypy,ruff`) |
+| `NO_COLOR`  | Disable colored output when set                      |
 
 ## How It Works
 
@@ -261,7 +280,7 @@ When you stage only part of a file (`git add -p`), nizm stashes the unstaged cha
 A rescue ref is saved at `refs/nizm-backup` before every stash operation. If anything goes wrong:
 
 ```bash
-git stash apply refs/nizm-backup
+nizm recover
 ```
 
 ### Parallel execution
@@ -270,7 +289,7 @@ With `--parallel`, each manifest's hooks run in a separate thread. Hooks within 
 
 ### Monorepo support
 
-nizm walks your repo (up to 5 levels deep) to discover manifests. Each manifest's hooks run with `cwd` set to that manifest's directory, so tools resolve paths correctly:
+nizm uses `git ls-files` to discover manifests, respecting `.gitignore` at all levels. Each manifest's hooks run with `cwd` set to that manifest's directory, so tools resolve paths correctly:
 
 ```
 repo/

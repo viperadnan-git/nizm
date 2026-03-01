@@ -148,25 +148,27 @@ fn shell_escape(s: &str) -> String {
 /// Simple glob matcher supporting:
 /// - `*.ext` / `**/*.ext` — extension match at any depth
 /// - `*.{a,b,c}` — multiple extensions
+/// - `{a,b}` alternations at any position
 /// - `dir/*.ext` — single-level match under dir
 fn glob_match(pattern: &str, path: &str) -> bool {
+    // Expand {a,b,c} alternations at any position
+    if let Some(open) = pattern.find('{')
+        && let Some(rel_close) = pattern[open..].find('}')
+    {
+        let close = open + rel_close;
+        let prefix = &pattern[..open];
+        let suffix = &pattern[close + 1..];
+        return pattern[open + 1..close]
+            .split(',')
+            .any(|alt| glob_match(&format!("{prefix}{alt}{suffix}"), path));
+    }
+
     // Patterns without `/` match at any depth (like `*.py`)
     let pattern = if pattern.contains('/') {
         pattern.to_string()
     } else {
         format!("**/{pattern}")
     };
-
-    // Handle `*.{ext1,ext2}` — expand alternations on the extension
-    if let Some(star_pos) = pattern.rfind("*.{") {
-        let after = &pattern[star_pos + 3..];
-        if let Some(close) = after.find('}') {
-            let prefix = &pattern[..star_pos];
-            return after[..close]
-                .split(',')
-                .any(|ext| glob_match_simple(&format!("{prefix}*.{ext}"), path));
-        }
-    }
 
     glob_match_simple(&pattern, path)
 }

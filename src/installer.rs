@@ -180,7 +180,14 @@ fn require_overwrite_consent(message: &str, force: bool, interactive: bool) -> R
 fn generate_block(manifests: &[PathBuf], parallel: bool, hook_type: HookType) -> String {
     let config_args: String = manifests
         .iter()
-        .map(|p| format!(" --config {}", p.display()))
+        .map(|p| {
+            let s = p.display().to_string();
+            if s.contains(|c: char| c.is_ascii_whitespace() || c == '\'') {
+                format!(" --config '{}'", s.replace('\'', "'\\''"))
+            } else {
+                format!(" --config {s}")
+            }
+        })
         .collect();
 
     let parallel_flag = if parallel { " --parallel" } else { "" };

@@ -175,6 +175,22 @@ fn purge_toml(file_path: &Path, key_path: &[&str]) -> Result<bool> {
                 .is_some_and(|tbl| tbl.is_empty())
         };
         if is_empty {
+            // Navigate with immutable check first, then re-borrow mutably
+            let reachable = {
+                let mut t: &toml_edit::Table = doc.as_table();
+                parent_path[..depth]
+                    .iter()
+                    .all(|&k| match t.get(k).and_then(|v| v.as_table()) {
+                        Some(inner) => {
+                            t = inner;
+                            true
+                        }
+                        None => false,
+                    })
+            };
+            if !reachable {
+                break;
+            }
             let mut t = doc.as_table_mut();
             for &k in &parent_path[..depth] {
                 t = t[k].as_table_mut().unwrap();
