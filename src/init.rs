@@ -3,7 +3,9 @@ use dialoguer::MultiSelect;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::{config, config::detect_json_indent, installer, knowledge, style};
+use crate::{
+    config, config::detect_json_indent, config::serialize_json, installer, knowledge, style,
+};
 
 pub fn init(repo_root: &Path, explicit_hooks: Vec<String>) -> Result<()> {
     let manifests = config::discover_manifests(repo_root)?;
@@ -338,185 +340,45 @@ fn inject_toml(file_path: &Path, table_path: &[&str], entry: &knowledge::ToolEnt
     Ok(())
 }
 
-/// Format-preserving JSON injection. Edits the raw string instead of
-/// re-serializing, so existing indentation and key order are untouched.
+/// Inject a hook into a package.json using serde (preserve_order keeps key order).
 fn inject_json(file_path: &Path, entry: &knowledge::ToolEntry) -> Result<()> {
     let content = std::fs::read_to_string(file_path)
         .with_context(|| format!("failed to read {}", file_path.display()))?;
 
-    let root: serde_json::Value = serde_json::from_str(&content).context("failed to parse JSON")?;
+    let mut root: serde_json::Value =
+        serde_json::from_str(&content).context("failed to parse JSON")?;
 
     let indent = detect_json_indent(&content);
-    let i = |n: usize| indent.repeat(n);
 
-    // Build the hook value fragment (JSON-escape values to handle quotes/backslashes)
-    let cmd_json = serde_json::to_string(entry.cmd)?;
-    let hook_val = if let Some(glob) = entry.glob {
-        let glob_json = serde_json::to_string(glob)?;
-        format!(
-            "{{\n{}\"cmd\": {},\n{}\"glob\": {}\n{}}}",
-            i(4),
-            cmd_json,
-            i(4),
-            glob_json,
-            i(3)
-        )
-    } else {
-        format!("{{ \"cmd\": {} }}", cmd_json)
-    };
+    // Ensure nizm.hooks exists
+    let nizm = root
+        .as_object_mut()
+        .context("expected JSON object")?
+        .entry("nizm")
+        .or_insert_with(|| serde_json::json!({}));
+    let hooks = nizm
+        .as_object_mut()
+        .context("expected nizm to be an object")?
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    let hooks_obj = hooks
+        .as_object_mut()
+        .context("expected hooks to be an object")?;
 
-    let has_nizm = root.get("nizm").is_some();
-    let has_hooks = root
-        .get("nizm")
-        .and_then(|n| n.get("hooks"))
-        .and_then(|h| h.as_object())
-        .is_some();
-    let hooks_non_empty = root
-        .get("nizm")
-        .and_then(|n| n.get("hooks"))
-        .and_then(|h| h.as_object())
-        .is_some_and(|m| !m.is_empty());
+    // Build hook value
+    let mut hook = serde_json::Map::new();
+    hook.insert("cmd".into(), entry.cmd.into());
+    if let Some(glob) = entry.glob {
+        hook.insert("glob".into(), glob.into());
+    }
+    hooks_obj.insert(entry.name.into(), serde_json::Value::Object(hook));
 
-    let result = if has_hooks {
-        let close = json_find_object_close(&content, &["nizm", "hooks"])?;
-        let comma = if hooks_non_empty { "," } else { "" };
-        format!(
-            "{}{}\n{}\"{}\": {}\n{}{}",
-            content[..close].trim_end(),
-            comma,
-            i(3),
-            entry.name,
-            hook_val,
-            i(2),
-            &content[close..]
-        )
-    } else if has_nizm {
-        let close = json_find_object_close(&content, &["nizm"])?;
-        let nizm_non_empty = root["nizm"].as_object().is_some_and(|m| !m.is_empty());
-        let comma = if nizm_non_empty { "," } else { "" };
-        format!(
-            "{}{}\n{}\"hooks\": {{\n{}\"{}\": {}\n{}}}\n{}{}",
-            content[..close].trim_end(),
-            comma,
-            i(2),
-            i(3),
-            entry.name,
-            hook_val,
-            i(2),
-            i(1),
-            &content[close..]
-        )
-    } else {
-        let close = json_find_object_close(&content, &[])?;
-        let root_non_empty = root.as_object().is_some_and(|m| !m.is_empty());
-        let comma = if root_non_empty { "," } else { "" };
-        format!(
-            "{}{}\n{}\"nizm\": {{\n{}\"hooks\": {{\n{}\"{}\": {}\n{}}}\n{}}}\n{}",
-            content[..close].trim_end(),
-            comma,
-            i(1),
-            i(2),
-            i(3),
-            entry.name,
-            hook_val,
-            i(2),
-            i(1),
-            &content[close..]
-        )
-    };
+    let output = serialize_json(&root, &indent)?;
 
-    std::fs::write(file_path, result)
+    std::fs::write(file_path, &output)
         .with_context(|| format!("failed to write {}", file_path.display()))?;
 
     Ok(())
-}
-
-/// Find the byte position of the closing `}` for a JSON object at the given key path.
-/// Empty path = root object.
-fn json_find_object_close(content: &str, path: &[&str]) -> Result<usize> {
-    let open = if path.is_empty() {
-        content.find('{').context("no root JSON object")?
-    } else {
-        let mut pos = 0;
-        for &key in path {
-            pos = json_find_key_open_brace(content, pos, key)?;
-        }
-        pos
-    };
-
-    json_find_matching_brace(content, open)
-}
-
-/// Find the `{` that is the object value of `"key":` starting search from `start`.
-fn json_find_key_open_brace(content: &str, start: usize, key: &str) -> Result<usize> {
-    let needle = format!("\"{key}\"");
-    let mut pos = start;
-
-    loop {
-        let key_pos = content[pos..]
-            .find(&needle)
-            .map(|p| p + pos)
-            .with_context(|| format!("key \"{key}\" not found in JSON"))?;
-
-        let after = key_pos + needle.len();
-        // Look for : then {
-        let mut found_colon = false;
-        for (i, ch) in content[after..].char_indices() {
-            if ch.is_whitespace() {
-                continue;
-            }
-            if !found_colon {
-                if ch == ':' {
-                    found_colon = true;
-                    continue;
-                }
-                break;
-            }
-            // After colon, expect {
-            if ch == '{' {
-                return Ok(after + i);
-            }
-            break;
-        }
-        pos = after;
-    }
-}
-
-/// Find the matching `}` for `{` at position `open`, handling strings and nesting.
-fn json_find_matching_brace(content: &str, open: usize) -> Result<usize> {
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escape = false;
-
-    for (i, ch) in content[open..].char_indices() {
-        if escape {
-            escape = false;
-            continue;
-        }
-        if ch == '\\' && in_string {
-            escape = true;
-            continue;
-        }
-        if ch == '"' {
-            in_string = !in_string;
-            continue;
-        }
-        if in_string {
-            continue;
-        }
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Ok(open + i);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    anyhow::bail!("unmatched brace in JSON")
 }
 
 // --- Tool config injection ---

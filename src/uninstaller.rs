@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use dialoguer::Confirm;
-use serde::Serialize;
 use std::path::Path;
 
-use crate::{config, config::ALL_HOOK_TYPES, config::detect_json_indent, installer, style};
+use crate::{
+    config, config::ALL_HOOK_TYPES, config::detect_json_indent, config::serialize_json, installer,
+    style,
+};
 
 pub fn uninstall(repo_root: &Path, purge: bool) -> Result<()> {
     let mut removed_any = false;
@@ -207,14 +209,7 @@ fn purge_json(file_path: &Path) -> Result<bool> {
         return Ok(false);
     }
 
-    // Detect original indent and rewrite with same style
-    let indent = detect_json_indent(&content);
-    let formatter = serde_json::ser::PrettyFormatter::with_indent(indent.as_bytes());
-    let mut buf = Vec::new();
-    let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
-    root.serialize(&mut ser)?;
-    let mut output = String::from_utf8(buf)?;
-    output.push('\n');
+    let output = serialize_json(&root, &detect_json_indent(&content))?;
 
     std::fs::write(file_path, output)
         .with_context(|| format!("failed to write {}", file_path.display()))?;

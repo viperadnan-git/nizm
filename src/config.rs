@@ -331,20 +331,35 @@ fn parse_nizm_toml(content: &str) -> Result<IndexMap<String, HookConfig>> {
 // --- JSON parser ---
 
 fn parse_package_json(content: &str) -> Result<IndexMap<String, HookConfig>> {
-    let root: serde_json::Value = serde_json::from_str(content)?;
+    let mut root: serde_json::Value = serde_json::from_str(content)?;
     let hooks = root
-        .get("nizm")
-        .and_then(|n| n.get("hooks"))
-        .and_then(|h| h.as_object());
+        .get_mut("nizm")
+        .and_then(|n| n.get_mut("hooks"))
+        .and_then(|h| h.as_object_mut())
+        .map(std::mem::take);
 
     match hooks {
         Some(map) => {
-            let parsed: IndexMap<String, HookConfig> =
-                serde_json::from_value(serde_json::Value::Object(map.clone()))?;
+            let mut parsed = IndexMap::with_capacity(map.len());
+            for (k, v) in map {
+                parsed.insert(k, serde_json::from_value(v)?);
+            }
             Ok(parsed)
         }
         None => Ok(IndexMap::new()),
     }
+}
+
+/// Serialize a JSON value with the given indentation, trailing newline included.
+pub fn serialize_json(value: &serde_json::Value, indent: &str) -> Result<String> {
+    use serde::Serialize;
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(indent.as_bytes());
+    let mut buf = Vec::new();
+    let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+    value.serialize(&mut ser)?;
+    let mut output = String::from_utf8(buf)?;
+    output.push('\n');
+    Ok(output)
 }
 
 /// Detect indentation used in a JSON file (first indented line).

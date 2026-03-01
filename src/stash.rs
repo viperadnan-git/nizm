@@ -52,8 +52,10 @@ impl StashGuard {
 
     pub fn restore(&mut self) -> Result<()> {
         if STASH_ACTIVE.swap(false, Ordering::SeqCst) {
-            git::restore_unstaged()?;
-            git::drop_rescue_ref()?;
+            let had_conflicts = git::restore_unstaged()?;
+            if !had_conflicts {
+                git::drop_rescue_ref()?;
+            }
         }
         Ok(())
     }
@@ -63,13 +65,16 @@ impl Drop for StashGuard {
     fn drop(&mut self) {
         if STASH_ACTIVE.swap(false, Ordering::SeqCst) {
             // catch_unwind prevents double-panic abort if restore panics during unwind.
-            let result = panic::catch_unwind(|| {
-                if let Err(e) = git::restore_unstaged() {
+            let result = panic::catch_unwind(|| match git::restore_unstaged() {
+                Ok(had_conflicts) => {
+                    if !had_conflicts {
+                        let _ = git::drop_rescue_ref();
+                    }
+                }
+                Err(e) => {
                     eprintln!("{} failed to restore stash: {e}", style::red_bold("nizm:"));
                     eprintln!("nizm: rescue snapshot: git stash apply refs/nizm-backup");
-                    return;
                 }
-                let _ = git::drop_rescue_ref();
             });
             if result.is_err() {
                 eprintln!("{} panic during stash restore", style::red_bold("nizm:"));

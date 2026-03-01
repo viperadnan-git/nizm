@@ -31,7 +31,9 @@ pub static TOOLS: &[ToolEntry] = &[
         packages: &["prettier"],
         name: "prettier",
         cmd: "prettier --write {staged_files}",
-        glob: None,
+        glob: Some(
+            "*.{js,jsx,ts,tsx,mjs,cjs,css,scss,less,html,json,md,yaml,yml,graphql,vue,svelte}",
+        ),
     },
     ToolEntry {
         packages: &["eslint"],

@@ -126,7 +126,8 @@ pub fn stash_keep_index() -> Result<()> {
 /// `git stash pop` doesn't work with `--keep-index` (always conflicts),
 /// so we extract the unstaged diff and apply it directly.
 /// If hooks modified files, --3way merge may conflict — resolved with checkout --ours.
-pub fn restore_unstaged() -> Result<()> {
+/// Returns `true` if conflicts were resolved (rescue ref should be kept for recovery).
+pub fn restore_unstaged() -> Result<bool> {
     // Extract unstaged-only diff: stash index → stash working tree
     let diff = Command::new("git")
         .args(["diff", "stash@{0}^2", "stash@{0}"])
@@ -144,12 +145,12 @@ pub fn restore_unstaged() -> Result<()> {
         .status();
 
     if diff.stdout.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     // Try plain apply first — only modifies working tree, preserves index.
     if apply_patch(&diff.stdout, false)? {
-        return Ok(());
+        return Ok(false);
     }
 
     // Plain apply failed (hooks changed base content). Use --3way (implies --index).
@@ -174,10 +175,11 @@ pub fn restore_unstaged() -> Result<()> {
                 }
             );
             eprintln!("nizm: recover original state: git stash apply refs/nizm-backup");
+            return Ok(true);
         }
     }
 
-    Ok(())
+    Ok(false)
 }
 
 fn restore_untracked_from_stash() -> Result<()> {
