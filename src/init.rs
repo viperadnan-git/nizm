@@ -351,18 +351,20 @@ fn inject_json(file_path: &Path, entry: &knowledge::ToolEntry) -> Result<()> {
     let indent = detect_json_indent(&content);
     let i = |n: usize| indent.repeat(n);
 
-    // Build the hook value fragment
+    // Build the hook value fragment (JSON-escape values to handle quotes/backslashes)
+    let cmd_json = serde_json::to_string(entry.cmd)?;
     let hook_val = if let Some(glob) = entry.glob {
+        let glob_json = serde_json::to_string(glob)?;
         format!(
-            "{{\n{}\"cmd\": \"{}\",\n{}\"glob\": \"{}\"\n{}}}",
+            "{{\n{}\"cmd\": {},\n{}\"glob\": {}\n{}}}",
             i(4),
-            entry.cmd,
+            cmd_json,
             i(4),
-            glob,
+            glob_json,
             i(3)
         )
     } else {
-        format!("{{ \"cmd\": \"{}\" }}", entry.cmd)
+        format!("{{ \"cmd\": {} }}", cmd_json)
     };
 
     let has_nizm = root.get("nizm").is_some();
@@ -431,19 +433,7 @@ fn inject_json(file_path: &Path, entry: &knowledge::ToolEntry) -> Result<()> {
     Ok(())
 }
 
-/// Detect indentation used in a JSON file (first indented line).
-fn detect_json_indent(content: &str) -> String {
-    for line in content.lines().skip(1) {
-        let trimmed = line.trim_start();
-        if !trimmed.is_empty() {
-            let leading = &line[..line.len() - trimmed.len()];
-            if !leading.is_empty() {
-                return leading.to_string();
-            }
-        }
-    }
-    "  ".to_string()
-}
+use crate::config::detect_json_indent;
 
 /// Find the byte position of the closing `}` for a JSON object at the given key path.
 /// Empty path = root object.

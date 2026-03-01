@@ -3,17 +3,9 @@ use dialoguer::Confirm;
 use serde::Serialize;
 use std::path::Path;
 
-use crate::{
-    config::{self, HookType},
-    installer, style,
-};
+use crate::{config, installer, style};
 
-const ALL_HOOK_TYPES: &[HookType] = &[
-    HookType::PreCommit,
-    HookType::PrePush,
-    HookType::CommitMsg,
-    HookType::PrepareCommitMsg,
-];
+use config::ALL_HOOK_TYPES;
 
 pub fn uninstall(repo_root: &Path, purge: bool) -> Result<()> {
     let mut removed_any = false;
@@ -168,16 +160,10 @@ fn purge_toml(file_path: &Path, key_path: &[&str]) -> Result<bool> {
     }
 
     // Clean up empty parent tables bottom-up
-    let mut text = doc.to_string();
     for depth in (0..parent_path.len()).rev() {
-        let mut reparsed = text
-            .parse::<toml_edit::DocumentMut>()
-            .context("re-parse failed")?;
-
-        // Check if the table at this depth is empty (immutable pass)
+        let key = parent_path[depth];
         let is_empty = {
-            let mut t: &toml_edit::Table = reparsed.as_table();
-            let key = parent_path[depth];
+            let mut t: &toml_edit::Table = doc.as_table();
             for &k in &parent_path[..depth] {
                 match t.get(k).and_then(|v| v.as_table()) {
                     Some(inner) => t = inner,
@@ -188,21 +174,18 @@ fn purge_toml(file_path: &Path, key_path: &[&str]) -> Result<bool> {
                 .and_then(|v| v.as_table())
                 .is_some_and(|tbl| tbl.is_empty())
         };
-
         if is_empty {
-            // Mutable pass to remove
-            let mut t = reparsed.as_table_mut();
+            let mut t = doc.as_table_mut();
             for &k in &parent_path[..depth] {
                 t = t[k].as_table_mut().unwrap();
             }
-            t.remove(parent_path[depth]);
-            text = reparsed.to_string();
+            t.remove(key);
         } else {
             break;
         }
     }
 
-    std::fs::write(file_path, text)
+    std::fs::write(file_path, doc.to_string())
         .with_context(|| format!("failed to write {}", file_path.display()))?;
 
     Ok(true)
@@ -241,15 +224,4 @@ fn purge_json(file_path: &Path) -> Result<bool> {
     Ok(true)
 }
 
-fn detect_json_indent(content: &str) -> String {
-    for line in content.lines().skip(1) {
-        let trimmed = line.trim_start();
-        if !trimmed.is_empty() {
-            let leading = &line[..line.len() - trimmed.len()];
-            if !leading.is_empty() {
-                return leading.to_string();
-            }
-        }
-    }
-    "  ".to_string()
-}
+use crate::config::detect_json_indent;

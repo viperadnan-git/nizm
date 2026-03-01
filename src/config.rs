@@ -38,6 +38,13 @@ impl std::fmt::Display for HookType {
     }
 }
 
+pub const ALL_HOOK_TYPES: &[HookType] = &[
+    HookType::PreCommit,
+    HookType::PrePush,
+    HookType::CommitMsg,
+    HookType::PrepareCommitMsg,
+];
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct HookConfig {
     pub cmd: String,
@@ -105,13 +112,17 @@ fn walk_manifests(dir: &Path, root: &Path, found: &mut Vec<PathBuf>, depth: usiz
     };
 
     for entry in entries.flatten() {
+        let ft = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
         let path = entry.path();
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        if path.is_file() && MANIFEST_NAMES.contains(&name_str.as_ref()) {
+        if ft.is_file() && MANIFEST_NAMES.contains(&name_str.as_ref()) {
             found.push(path.strip_prefix(root).unwrap_or(&path).to_path_buf());
-        } else if path.is_dir() && !SKIP_DIRS.contains(&name_str.as_ref()) {
+        } else if ft.is_dir() && !SKIP_DIRS.contains(&name_str.as_ref()) {
             walk_manifests(&path, root, found, depth + 1)?;
         }
     }
@@ -334,4 +345,18 @@ fn parse_package_json(content: &str) -> Result<IndexMap<String, HookConfig>> {
         }
         None => Ok(IndexMap::new()),
     }
+}
+
+/// Detect indentation used in a JSON file (first indented line).
+pub fn detect_json_indent(content: &str) -> String {
+    for line in content.lines().skip(1) {
+        let trimmed = line.trim_start();
+        if !trimmed.is_empty() {
+            let leading = &line[..line.len() - trimmed.len()];
+            if !leading.is_empty() {
+                return leading.to_string();
+            }
+        }
+    }
+    "  ".to_string()
 }

@@ -55,17 +55,24 @@ pub fn staged_files() -> Result<Vec<String>> {
         .collect())
 }
 
-/// Check if any staged files also have unstaged changes (partial staging).
-pub fn has_partial_staging(staged: &[String]) -> Result<bool> {
+fn unstaged_files() -> Result<std::collections::HashSet<String>> {
     let output = Command::new("git")
         .args(["diff", "--name-only"])
         .output()
         .context("git diff failed")?;
 
     let stdout = String::from_utf8(output.stdout)?;
-    let unstaged: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
+    Ok(stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect())
+}
 
-    Ok(staged.iter().any(|f| unstaged.contains(&f.as_str())))
+/// Check if any staged files also have unstaged changes (partial staging).
+pub fn has_partial_staging(staged: &[String]) -> Result<bool> {
+    let unstaged = unstaged_files()?;
+    Ok(staged.iter().any(|f| unstaged.contains(f)))
 }
 
 /// Create a rescue snapshot ref for recovery.
@@ -246,17 +253,10 @@ fn conflicted_files() -> Result<Vec<String>> {
 
 /// Return staged files that were modified by hooks (now have unstaged changes).
 pub fn modified_staged_files(staged: &[String]) -> Result<Vec<String>> {
-    let output = Command::new("git")
-        .args(["diff", "--name-only"])
-        .output()
-        .context("git diff failed")?;
-
-    let stdout = String::from_utf8(output.stdout)?;
-    let unstaged: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
-
+    let unstaged = unstaged_files()?;
     Ok(staged
         .iter()
-        .filter(|f| unstaged.contains(&f.as_str()))
+        .filter(|f| unstaged.contains(*f))
         .cloned()
         .collect())
 }

@@ -136,10 +136,12 @@ fn scope_files<'a>(
 }
 
 fn shell_escape(s: &str) -> String {
-    if s.contains(|c: char| c.is_whitespace() || c == '\'' || c == '"' || c == '\\') {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    } else {
+    if s.chars().all(|c| {
+        c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '/' | '@' | ':' | '+' | ',')
+    }) {
         s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
     }
 }
 

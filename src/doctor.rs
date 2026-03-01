@@ -1,18 +1,12 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::{
     config::{self, HookResult, HookType, LenientManifest},
     installer, style,
 };
 
-const ALL_HOOK_TYPES: &[HookType] = &[
-    HookType::PreCommit,
-    HookType::PrePush,
-    HookType::CommitMsg,
-    HookType::PrepareCommitMsg,
-];
+use config::ALL_HOOK_TYPES;
 
 struct Counters {
     pass: usize,
@@ -280,12 +274,12 @@ fn extract_executable(cmd: &str) -> &str {
     cmd.split_whitespace().next().unwrap_or(cmd)
 }
 
-/// Check if an executable exists in PATH using POSIX `command -v`.
+/// Check if an executable exists in PATH.
 fn command_exists(exe: &str) -> bool {
-    Command::new("sh")
-        .args(["-c", &format!("command -v {exe}")])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    if exe.contains('/') {
+        return Path::new(exe).is_file();
+    }
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(exe).is_file()))
+        .unwrap_or(false)
 }
