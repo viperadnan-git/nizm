@@ -13,7 +13,7 @@
 [![CI][ci-badge]][ci-url]
 [![License][license-badge]][license-url]
 
-[Features](#features) · [Quick Start](#quick-start) · [Installation](#installation) · [Configuration](#configuration) · [Commands](#commands) · [How It Works](#how-it-works)
+[Quick Start](#quick-start) · [Installation](#installation) · [Configuration](#configuration) · [Commands](#commands) · [How It Works](#how-it-works)
 
 </div>
 
@@ -21,9 +21,10 @@
 
 ```console
 $ nizm run
-  ruff check --fix (3 file(s))
-  mypy (3 file(s))
-  ✓ all hooks passed (0.24s)
+nizm: running against 3 staged files
+  ruff 3 files (120ms)
+  mypy 3 files (340ms)
+nizm: done in 461ms
 ```
 
 ## Features
@@ -35,24 +36,29 @@ $ nizm run
 - **Monorepo-ready** — per-directory CWD isolation, multiple manifests, parallel execution
 - **Auto-add** — files modified by formatters are automatically re-staged
 - **Smart init** — scans dev-dependencies, suggests hooks it already knows about
-- **Self-diagnosing** — `nizm doctor` verifies your setup and offers repairs
+- **Self-diagnosing** — `nizm doctor` verifies your setup and suggests fixes
 
 ## Quick Start
 
 ```bash
-# Install
 npm install -g nizm-cli   # or: cargo install nizm
-
-# Scan your project and inject hooks into your manifest
-nizm init
-
-# Install the git hook
-nizm install
-
-# That's it. Next git commit triggers your hooks automatically.
+nizm init                 # scans dev-deps, injects hooks, installs git hook
 ```
 
+That's it. Your next `git commit` runs your hooks automatically.
+
 ## Installation
+
+<details open>
+<summary><strong>npm / bun / pnpm / yarn</strong></summary>
+
+```bash
+npm install -g nizm-cli
+```
+
+Platform-native binary — zero Node.js overhead at runtime.
+
+</details>
 
 <details>
 <summary><strong>Cargo (from source)</strong></summary>
@@ -60,17 +66,6 @@ nizm install
 ```bash
 cargo install nizm
 ```
-
-</details>
-
-<details>
-<summary><strong>npm / bun / pnpm / yarn</strong></summary>
-
-```bash
-npm install -g nizm-cli
-```
-
-Platform-native binary — zero Node.js overhead at runtime. The postinstall script replaces the JS wrapper with your platform's prebuilt binary.
 
 </details>
 
@@ -114,8 +109,8 @@ mypy  = { cmd = "mypy {staged_files}",              glob = "*.py" }
 
 ```toml
 [package.metadata.nizm.hooks]
-rustfmt = { cmd = "cargo fmt",                    glob = "*.rs" }
-clippy  = { cmd = "cargo clippy -- -D warnings",  glob = "*.rs" }
+clippy  = { cmd = "cargo clippy --fix --allow-dirty -- -D warnings", glob = "*.rs" }
+rustfmt = { cmd = "cargo fmt",                                       glob = "*.rs" }
 ```
 
 ### .nizm.toml
@@ -140,99 +135,98 @@ test  = { cmd = "make test" }
 
 ## Commands
 
-### `nizm run [HOOK] [--config <path>...] [--parallel]`
+### `nizm init`
 
-Runs hooks against staged files. This is what the git hook calls.
-
-```console
-$ nizm run
-  prettier --write (5 file(s))
-  eslint --fix (5 file(s))
-  ✓ all hooks passed (0.41s)
-```
-
-| Flag              | Description                                                             |
-| :---------------- | :---------------------------------------------------------------------- |
-| `HOOK`            | Run a single hook by name                                               |
-| `--config <path>` | Explicit manifest paths (repeatable). Skips auto-discovery.             |
-| `--parallel`      | Run manifests concurrently. Hooks within each manifest stay sequential. |
-
-### `nizm install [--config <path>...] [--parallel] [--force]`
-
-Writes a `pre-commit` hook into `.git/hooks/` that calls `nizm run` with baked-in config paths. If a hook already exists, nizm appends its block — existing hooks are preserved.
-
-```console
-$ nizm install --config pyproject.toml --config frontend/package.json
-  ✓ installed pre-commit hook
-```
-
-| Flag              | Description                                                     |
-| :---------------- | :-------------------------------------------------------------- |
-| `--config <path>` | Bake specific manifests into the hook script (non-interactive). |
-| `--parallel`      | Bake `--parallel` flag into the hook script.                    |
-| `--force`         | Overwrite modified nizm blocks without prompting.               |
-
-> [!NOTE]
-> Without `--config`, nizm discovers manifests and shows an interactive picker.
-
-### `nizm init [HOOK...]`
-
-Scans dev-dependencies across all manifests, matches them against known tools, and injects hook definitions.
+Scans dev-dependencies, suggests hooks, and injects them into your manifest.
 
 ```console
 $ nizm init
-  Found dev-dependencies:
-    pyproject.toml: ruff, mypy
-    package.json: prettier, eslint
-  ? Select hooks to add: [ruff, mypy, prettier, eslint]
-  ✓ injected 2 hooks into pyproject.toml
-  ✓ injected 2 hooks into package.json
+  added clippy       cargo clippy --fix --allow-dirty -- -D warnings
+  added rustfmt      cargo fmt
+
+  Cargo.toml — [clippy, rustfmt]
+pre-commit hook installed
 ```
 
-Pass hook names directly to skip the interactive prompt:
-
-```bash
-nizm init ruff prettier
-```
+Pass hook names directly for non-interactive use: `nizm init ruff prettier`
 
 **Known tools:** `ruff` · `black` · `mypy` · `prettier` · `eslint` · `biome` · `rustfmt` · `clippy`
 
 > [!TIP]
 > For Rust projects, `rustfmt` and `clippy` are suggested automatically when a `[package]` section exists — no dev-dependency needed.
 
-### `nizm uninstall [--purge]`
+### `nizm install`
 
-Removes nizm from the project. Deletes the nizm block from the pre-commit hook (preserving any foreign hooks in the same file). Optionally purges hook config from all manifests.
+Writes a git hook into `.git/hooks/` that calls `nizm run`. Existing hooks are preserved.
 
 ```console
-$ nizm uninstall --purge
-  nizm block removed from pre-commit hook
-  cleaned pyproject.toml
-  cleaned package.json
+$ nizm install
+scanning for manifests...
+  pyproject.toml — [ruff, mypy]
+pre-commit hook installed
 ```
 
-| Flag      | Description                                                              |
-| :-------- | :----------------------------------------------------------------------- |
-| `--purge` | Also remove nizm hook config from manifests (interactive prompt if omitted). |
+| Flag | Description |
+| :--- | :---------- |
+| `--config <path>` | Bake specific manifests (repeatable, skips interactive picker) |
+| `--parallel` | Bake `--parallel` flag into the hook script |
+| `--force` | Overwrite modified nizm blocks without prompting |
+
+### `nizm run`
+
+Runs hooks against staged files. This is what the git hook calls.
+
+```console
+$ nizm run
+nizm: running against 5 staged files
+  clippy 5 files (780ms)
+  rustfmt 5 files (210ms)
+nizm: done in 991ms
+```
+
+| Flag | Description |
+| :--- | :---------- |
+| `HOOK` | Run a single hook by name |
+| `--config <path>` | Explicit manifest paths (repeatable, skips auto-discovery) |
+| `--parallel` | Run manifests concurrently |
+| `--all` | Run against all tracked files instead of staged |
+| `--hook-type <TYPE>` | Hook type to run (default: `pre-commit`) |
 
 ### `nizm doctor`
 
-Diagnoses your hook setup and offers automatic repair.
+Diagnoses hook health — checks hook files, config validity, and tool availability.
 
 ```console
 $ nizm doctor
-  ✓ pre-commit hook exists
-  ✓ hook is nizm-managed
-  ✓ config files valid
-  ✓ hook commands found in PATH
+hooks
+  pre-commit (nizm-managed) ✓
+  └ Cargo.toml ✓
+     ├ clippy (cargo) ✓
+     └ rustfmt (cargo) ✓
+
+all 4 checks passed
 ```
 
-**Checks performed:**
+### `nizm ls`
 
-1. Hook file exists at `.git/hooks/pre-commit`
-2. Hook is nizm-managed (not overwritten by another tool)
-3. Baked config paths exist and parse successfully
-4. Hook commands are resolvable in `PATH`
+Lists all configured hooks across discovered manifests.
+
+```console
+$ nizm ls
+Cargo.toml
+  clippy   cargo clippy --fix --allow-dirty -- -D warnings  *.rs
+  rustfmt  cargo fmt                                        *.rs
+```
+
+### `nizm uninstall`
+
+Removes nizm hook blocks from `.git/hooks/`. Use `--purge` to also strip hook config from manifests.
+
+```console
+$ nizm uninstall --purge
+pre-commit hook removed
+  cleaned Cargo.toml
+```
 
 ## How It Works
 
