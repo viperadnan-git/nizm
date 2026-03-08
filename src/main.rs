@@ -155,20 +155,26 @@ fn try_main() -> Result<ExitCode> {
     }
 }
 
-fn ls(repo_root: &Path) -> Result<()> {
-    let manifests = config::discover_manifests(repo_root)?;
-
-    // Collect all manifests with their hooks
-    let mut parsed: Vec<config::ManifestConfig> = Vec::new();
-    for path in &manifests {
-        match config::parse_manifest(repo_root, path) {
-            Ok(c) if !c.hooks.is_empty() => parsed.push(c),
-            Ok(_) => {}
+/// Parse all manifests, printing warnings for parse errors.
+fn parse_manifests_warn(repo_root: &Path, manifests: &[PathBuf]) -> Vec<config::ManifestConfig> {
+    let mut parsed = Vec::new();
+    for p in manifests {
+        match config::parse_manifest(repo_root, p) {
+            Ok(c) => parsed.push(c),
             Err(e) => {
-                eprintln!("  {} {} — {}", style::yellow("warning:"), path.display(), e);
+                eprintln!("  {} {} — {}", style::yellow("warning:"), p.display(), e);
             }
         }
     }
+    parsed
+}
+
+fn ls(repo_root: &Path) -> Result<()> {
+    let manifests = config::discover_manifests(repo_root)?;
+    let parsed: Vec<_> = parse_manifests_warn(repo_root, &manifests)
+        .into_iter()
+        .filter(|c| !c.hooks.is_empty())
+        .collect();
 
     if parsed.is_empty() {
         println!("no hooks configured");
@@ -218,10 +224,7 @@ fn run(
     hook_type: config::HookType,
 ) -> Result<ExitCode> {
     let configs: Vec<_> = if config_paths.is_empty() {
-        config::discover_manifests(&repo_root)?
-            .into_iter()
-            .filter_map(|p| config::parse_manifest(&repo_root, &p).ok())
-            .collect()
+        parse_manifests_warn(&repo_root, &config::discover_manifests(&repo_root)?)
     } else {
         config_paths
             .iter()

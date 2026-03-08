@@ -22,6 +22,7 @@ pub fn repo_root() -> Result<PathBuf> {
 pub fn tracked_files() -> Result<Vec<String>> {
     let output = Command::new("git")
         .args(["ls-files"])
+        .current_dir(repo_root()?)
         .output()
         .context("failed to run git ls-files")?;
 

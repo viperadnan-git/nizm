@@ -249,24 +249,82 @@ fn print_lenient_configs(
     }
 }
 
-/// Extract --config paths from the baked hook script.
+/// Extract --config paths from the baked hook script (inside the nizm-managed block only).
 fn parse_baked_configs(content: &str) -> Vec<PathBuf> {
     let mut configs = Vec::new();
+    let mut in_block = false;
     for line in content.lines() {
         let trimmed = line.trim();
-        if !trimmed.starts_with("nizm") {
+        if trimmed == installer::BLOCK_START {
+            in_block = true;
             continue;
         }
-        let mut parts = trimmed.split_whitespace().peekable();
-        while let Some(token) = parts.next() {
+        if trimmed == installer::BLOCK_END {
+            break;
+        }
+        if !in_block || !trimmed.starts_with("nizm") {
+            continue;
+        }
+        let tokens = shell_split(trimmed);
+        let mut iter = tokens.iter().peekable();
+        while let Some(token) = iter.next() {
             if token == "--config"
-                && let Some(path) = parts.next()
+                && let Some(path) = iter.next()
             {
                 configs.push(PathBuf::from(path));
             }
         }
     }
     configs
+}
+
+/// Split a shell command into tokens, respecting single-quoted strings.
+fn shell_split(s: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None; // tracks ' or "
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if let Some(q) = quote {
+            if c == q {
+                if q == '\'' {
+                    // Check for escaped quote: '\''
+                    if chars.peek() == Some(&'\\') {
+                        let mut lookahead = chars.clone();
+                        lookahead.next(); // skip '\'
+                        if lookahead.next() == Some('\'') && lookahead.peek() == Some(&'\'') {
+                            chars.next(); // '\'
+                            chars.next(); // '''
+                            chars.next(); // '''
+                            current.push('\'');
+                            continue;
+                        }
+                    }
+                }
+                quote = None;
+            } else if c == '\\' && q == '"' {
+                // Inside double quotes, backslash escapes the next char
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            } else {
+                current.push(c);
+            }
+        } else if c == '\'' || c == '"' {
+            quote = Some(c);
+        } else if c.is_ascii_whitespace() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
 }
 
 /// Extract the first executable from a command string.
