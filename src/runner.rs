@@ -115,6 +115,17 @@ fn scope_files<'a>(
         format!("{}/", dir_str)
     };
 
+    // Split glob into include and exclude (!) patterns
+    let (includes, excludes): (Vec<&str>, Vec<&str>) = glob_pattern
+        .map(|g| {
+            g.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .partition(|s| !s.starts_with('!'))
+        })
+        .unwrap_or_default();
+    let excludes: Vec<&str> = excludes.iter().map(|s| &s[1..]).collect();
+
     staged_files
         .iter()
         .filter_map(|file| {
@@ -124,9 +135,13 @@ fn scope_files<'a>(
                 file.strip_prefix(&prefix)?
             };
 
-            if let Some(pattern) = glob_pattern
-                && !glob_match(pattern, relative)
-            {
+            // If includes exist, file must match at least one
+            if !includes.is_empty() && !includes.iter().any(|p| glob_match(p, relative)) {
+                return None;
+            }
+
+            // If file matches any exclude, skip it
+            if excludes.iter().any(|p| glob_match(p, relative)) {
                 return None;
             }
 
