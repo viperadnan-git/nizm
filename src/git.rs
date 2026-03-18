@@ -58,6 +58,33 @@ pub fn staged_files() -> Result<Vec<String>> {
         .collect())
 }
 
+/// List files with unstaged modifications + untracked non-ignored files.
+/// These are files a hook may have created or modified in the working tree.
+pub fn dirty_files() -> Result<Vec<String>> {
+    // Modified tracked files (unstaged changes)
+    let modified = Command::new("git")
+        .args(["diff", "--name-only"])
+        .output()
+        .context("git diff failed")?;
+
+    // Untracked non-ignored files
+    let untracked = Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .output()
+        .context("git ls-files failed")?;
+
+    let mut files: Vec<String> = Vec::new();
+    if modified.status.success() {
+        let stdout = String::from_utf8(modified.stdout)?;
+        files.extend(stdout.lines().filter(|l| !l.is_empty()).map(String::from));
+    }
+    if untracked.status.success() {
+        let stdout = String::from_utf8(untracked.stdout)?;
+        files.extend(stdout.lines().filter(|l| !l.is_empty()).map(String::from));
+    }
+    Ok(files)
+}
+
 fn unstaged_files() -> Result<std::collections::HashSet<String>> {
     let output = Command::new("git")
         .args(["diff", "--name-only"])

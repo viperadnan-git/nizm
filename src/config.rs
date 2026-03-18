@@ -50,6 +50,7 @@ pub struct HookConfig {
     pub cmd: String,
     pub glob: Option<String>,
     pub r#type: Option<String>,
+    pub outputs: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -58,6 +59,7 @@ pub struct Hook {
     pub cmd: String,
     pub glob: Option<String>,
     pub hook_type: HookType,
+    pub outputs: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -147,6 +149,7 @@ pub fn parse_manifest(repo_root: &Path, manifest_path: &Path) -> Result<Manifest
                 cmd: cfg.cmd,
                 glob: cfg.glob,
                 hook_type,
+                outputs: cfg.outputs,
             }
         })
         .collect();
@@ -198,6 +201,7 @@ pub fn parse_manifest_lenient(repo_root: &Path, manifest_path: &Path) -> Lenient
                         cmd: cfg.cmd,
                         glob: cfg.glob,
                         hook_type,
+                        outputs: cfg.outputs,
                     })
                 }
                 Err(e) => HookResult::Err {

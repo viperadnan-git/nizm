@@ -165,7 +165,7 @@ fn shell_escape(s: &str) -> String {
 /// - `*.{a,b,c}` — multiple extensions
 /// - `{a,b}` alternations at any position
 /// - `dir/*.ext` — single-level match under dir
-fn glob_match(pattern: &str, path: &str) -> bool {
+pub fn glob_match(pattern: &str, path: &str) -> bool {
     // Expand {a,b,c} alternations at any position
     if let Some(open) = pattern.find('{')
         && let Some(rel_close) = pattern[open..].find('}')

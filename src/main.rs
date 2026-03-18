@@ -293,10 +293,11 @@ fn run(
 
     let run_start = Instant::now();
 
+    let mut files = files;
     let failed = if parallel && prepared.len() > 1 {
         run_parallel(&prepared, &files, hook_filter.as_deref(), &skip_set)
     } else {
-        run_sequential(&prepared, &files, hook_filter.as_deref(), &skip_set)
+        run_sequential(&prepared, &mut files, hook_filter.as_deref(), &skip_set)
     };
 
     println!(
@@ -341,7 +342,7 @@ type PreparedManifest<'a> = (&'a config::ManifestConfig, &'a std::path::Path, Pa
 
 fn run_sequential(
     prepared: &[PreparedManifest],
-    files: &[String],
+    files: &mut Vec<String>,
     hook_filter: Option<&str>,
     skip_set: &HashSet<String>,
 ) -> bool {
@@ -392,6 +393,10 @@ fn run_sequential(
                             runner::format_duration(elapsed)
                         ))
                     );
+                    // Stage declared outputs and refresh file list
+                    if let Some(outputs) = &hook.outputs {
+                        stage_outputs(outputs, files);
+                    }
                 }
                 Err(e) => {
                     eprintln!(
@@ -406,6 +411,49 @@ fn run_sequential(
         }
     }
     failed
+}
+
+/// Stage output files declared by a hook and refresh the staged file list.
+/// Only stages files that were actually modified by the hook (have unstaged changes
+/// or are untracked), not files that already match their staged/HEAD version.
+fn stage_outputs(patterns: &[String], files: &mut Vec<String>) {
+    // Get files that the hook actually changed (unstaged modifications + untracked)
+    let Ok(dirty) = git::dirty_files() else {
+        return;
+    };
+
+    let mut to_stage: Vec<String> = Vec::new();
+    for pattern in patterns {
+        for file in &dirty {
+            if runner::glob_match(pattern, file) {
+                to_stage.push(file.clone());
+            }
+        }
+    }
+
+    if to_stage.is_empty() {
+        return;
+    }
+
+    if git::add_files(&to_stage).is_err() {
+        return;
+    }
+
+    // Refresh staged file list
+    if let Ok(refreshed) = git::staged_files() {
+        let added_count = refreshed.len().saturating_sub(files.len());
+        *files = refreshed;
+        if added_count > 0 {
+            println!(
+                "  {} {}",
+                style::bold("nizm:"),
+                style::dim(&format!(
+                    "auto-staged {added_count} output {}",
+                    if added_count == 1 { "file" } else { "files" }
+                ))
+            );
+        }
+    }
 }
 
 struct HookResult {
