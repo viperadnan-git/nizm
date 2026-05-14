@@ -125,14 +125,41 @@ test  = { cmd = "make test" }
 
 ### Hook fields
 
-| Field  | Required | Description                                                           |
-| :----- | :------- | :-------------------------------------------------------------------- |
-| `cmd`  | yes      | Shell command to run. Use `{staged_files}` to receive the file list.  |
-| `glob` | no       | Filter staged files by pattern (`*.py`, `*.{js,ts}`, `src/**/*.rs`).  |
-| `type` | no       | Git hook type: `pre-commit` (default), `pre-push`, `commit-msg`, `prepare-commit-msg`. |
+| Field     | Type             | Required | Description                                                          |
+| :-------- | :--------------- | :------- | :------------------------------------------------------------------- |
+| `cmd`     | string           | yes      | Shell command to run. Use `{staged_files}` to receive the file list. |
+| `glob`    | string \| list   | no       | Filter staged files by pattern.                                      |
+| `outputs` | string \| list   | no       | Files produced/modified by the hook to auto-stage.                   |
+| `type`    | enum             | no       | Git stage: `pre-commit` (default), `pre-push`, `commit-msg`, `prepare-commit-msg`. |
 
 > [!TIP]
 > If `{staged_files}` is omitted, the command runs unconditionally when any file in scope is staged.
+
+### Glob syntax
+
+`glob` and `outputs` accept either a single pattern string or a list of patterns:
+
+```toml
+glob = "*.py"                                    # single pattern
+glob = ["*.py", "!**/migrations/**"]             # list (! = exclude)
+glob = "*.{js,jsx,ts,tsx}"                       # brace alternation
+outputs = ["dist/**", "*.min.js"]                # auto-stage generated files
+```
+
+Supported syntax (per pattern):
+
+| Pattern | Meaning |
+| :------ | :------ |
+| `*` | Any chars except `/` |
+| `?` | Single char except `/` |
+| `**` | Any number of path segments |
+| `[abc]`, `[a-z]`, `[!abc]` | Character classes |
+| `{a,b,c}` | Brace alternation (nests allowed) |
+| `!pattern` | Exclude prefix (only valid as the first char of an entry) |
+
+Bare patterns without `/` match at any depth — `*.rs` is equivalent to `**/*.rs`. Anchor with a `/` to restrict depth: `src/*.rs` matches only direct children of `src/`.
+
+Excludes always win: if any `!` pattern matches, the file is filtered out regardless of include order.
 
 ## Commands
 

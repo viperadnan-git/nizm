@@ -1,7 +1,27 @@
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::path::{Path, PathBuf};
+
+/// Deserialize either a single string or a list of strings into `Option<Vec<String>>`.
+/// Used so `glob` and `outputs` accept both `"*.rs"` and `["*.rs", "!**/gen/**"]`.
+fn string_or_vec<'de, D>(deserializer: D) -> std::result::Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Option::<OneOrMany>::deserialize(deserializer).map(|opt| {
+        opt.map(|v| match v {
+            OneOrMany::One(s) => vec![s],
+            OneOrMany::Many(v) => v,
+        })
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HookType {
@@ -48,8 +68,10 @@ pub const ALL_HOOK_TYPES: &[HookType] = &[
 #[derive(Debug, Clone, Deserialize)]
 pub struct HookConfig {
     pub cmd: String,
-    pub glob: Option<String>,
+    #[serde(default, deserialize_with = "string_or_vec")]
+    pub glob: Option<Vec<String>>,
     pub r#type: Option<String>,
+    #[serde(default, deserialize_with = "string_or_vec")]
     pub outputs: Option<Vec<String>>,
 }
 
@@ -57,7 +79,7 @@ pub struct HookConfig {
 pub struct Hook {
     pub name: String,
     pub cmd: String,
-    pub glob: Option<String>,
+    pub glob: Option<Vec<String>>,
     pub hook_type: HookType,
     pub outputs: Option<Vec<String>>,
 }

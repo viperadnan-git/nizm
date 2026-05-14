@@ -4,6 +4,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use crate::config::Hook;
+use crate::glob::Matcher;
 
 /// Execute a hook with scope filtering and CWD isolation.
 /// Returns (exit_code, duration, scoped_file_count).
@@ -13,7 +14,7 @@ pub fn exec_hook(
     manifest_dir: &Path,
     abs_cwd: &Path,
 ) -> Result<(i32, Duration, usize)> {
-    let scoped = scope_files(staged_files, manifest_dir, hook.glob.as_deref());
+    let scoped = scope_files(staged_files, manifest_dir, hook.glob.as_deref())?;
 
     if scoped.is_empty() {
         return Ok((0, Duration::ZERO, 0));
@@ -34,7 +35,7 @@ pub fn exec_hook_captured(
     manifest_dir: &Path,
     abs_cwd: &Path,
 ) -> Result<(i32, Duration, usize, String, String)> {
-    let scoped = scope_files(staged_files, manifest_dir, hook.glob.as_deref());
+    let scoped = scope_files(staged_files, manifest_dir, hook.glob.as_deref())?;
 
     if scoped.is_empty() {
         return Ok((0, Duration::ZERO, 0, String::new(), String::new()));
@@ -100,13 +101,13 @@ fn run_cmd(
     }
 }
 
-/// Filter staged files by manifest directory and optional glob pattern.
+/// Filter staged files by manifest directory and optional glob patterns.
 /// Returns references to relative path portions — no allocations for root manifests.
 fn scope_files<'a>(
     staged_files: &'a [String],
     manifest_dir: &Path,
-    glob_pattern: Option<&str>,
-) -> Vec<&'a str> {
+    glob_patterns: Option<&[String]>,
+) -> Result<Vec<&'a str>> {
     let dir_str = manifest_dir.to_string_lossy();
     let is_root = dir_str == "." || dir_str.is_empty();
     let prefix = if is_root {
@@ -115,18 +116,12 @@ fn scope_files<'a>(
         format!("{}/", dir_str)
     };
 
-    // Split glob into include and exclude (!) patterns
-    let (includes, excludes): (Vec<&str>, Vec<&str>) = glob_pattern
-        .map(|g| {
-            g.split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .partition(|s| !s.starts_with('!'))
-        })
-        .unwrap_or_default();
-    let excludes: Vec<&str> = excludes.iter().map(|s| &s[1..]).collect();
+    let matcher = match glob_patterns {
+        Some(patterns) => Some(Matcher::new(patterns)?),
+        None => None,
+    };
 
-    staged_files
+    Ok(staged_files
         .iter()
         .filter_map(|file| {
             let relative = if is_root {
@@ -134,20 +129,12 @@ fn scope_files<'a>(
             } else {
                 file.strip_prefix(&prefix)?
             };
-
-            // If includes exist, file must match at least one
-            if !includes.is_empty() && !includes.iter().any(|p| glob_match(p, relative)) {
-                return None;
+            match &matcher {
+                Some(m) if !m.is_match(relative) => None,
+                _ => Some(relative),
             }
-
-            // If file matches any exclude, skip it
-            if excludes.iter().any(|p| glob_match(p, relative)) {
-                return None;
-            }
-
-            Some(relative)
         })
-        .collect()
+        .collect())
 }
 
 fn shell_escape(s: &str) -> String {
@@ -158,94 +145,4 @@ fn shell_escape(s: &str) -> String {
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
     }
-}
-
-/// Simple glob matcher supporting:
-/// - `*.ext` / `**/*.ext` — extension match at any depth
-/// - `*.{a,b,c}` — multiple extensions
-/// - `{a,b}` alternations at any position
-/// - `dir/*.ext` — single-level match under dir
-pub fn glob_match(pattern: &str, path: &str) -> bool {
-    // Expand {a,b,c} alternations at any position
-    if let Some(open) = pattern.find('{')
-        && let Some(rel_close) = pattern[open..].find('}')
-    {
-        let close = open + rel_close;
-        let prefix = &pattern[..open];
-        let suffix = &pattern[close + 1..];
-        return pattern[open + 1..close]
-            .split(',')
-            .any(|alt| glob_match(&format!("{prefix}{alt}{suffix}"), path));
-    }
-
-    // Patterns without `/` match at any depth (like `*.py`)
-    let pattern = if pattern.contains('/') {
-        pattern.to_string()
-    } else {
-        format!("**/{pattern}")
-    };
-
-    glob_match_simple(&pattern, path)
-}
-
-fn glob_match_simple(pattern: &str, path: &str) -> bool {
-    let pat_parts: Vec<&str> = pattern.split('/').collect();
-    let path_parts: Vec<&str> = path.split('/').collect();
-    segments_match(&pat_parts, &path_parts)
-}
-
-/// Iterative segment matcher using an explicit stack instead of recursion.
-fn segments_match(pat: &[&str], path: &[&str]) -> bool {
-    let mut stack = vec![(0usize, 0usize)];
-
-    while let Some((pi, pathi)) = stack.pop() {
-        if pi == pat.len() {
-            if pathi == path.len() {
-                return true;
-            }
-            continue;
-        }
-        if pat[pi] == "**" {
-            // ** matches zero segments (skip **)
-            stack.push((pi + 1, pathi));
-            // ** matches one+ segments (consume one path segment, keep **)
-            if pathi < path.len() {
-                stack.push((pi, pathi + 1));
-            }
-        } else if pathi < path.len() && wildcard_match(pat[pi], path[pathi]) {
-            stack.push((pi + 1, pathi + 1));
-        }
-    }
-
-    false
-}
-
-/// Match a single segment with `*` wildcards (no `/`).
-fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let pat: Vec<char> = pattern.chars().collect();
-    let txt: Vec<char> = text.chars().collect();
-    let (mut pi, mut ti) = (0, 0);
-    let (mut star_pi, mut star_ti) = (usize::MAX, 0);
-
-    while ti < txt.len() {
-        if pi < pat.len() && (pat[pi] == '?' || pat[pi] == txt[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if pi < pat.len() && pat[pi] == '*' {
-            star_pi = pi;
-            star_ti = ti;
-            pi += 1;
-        } else if star_pi != usize::MAX {
-            pi = star_pi + 1;
-            star_ti += 1;
-            ti = star_ti;
-        } else {
-            return false;
-        }
-    }
-
-    while pi < pat.len() && pat[pi] == '*' {
-        pi += 1;
-    }
-    pi == pat.len()
 }

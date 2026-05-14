@@ -1,6 +1,7 @@
 mod config;
 mod doctor;
 mod git;
+mod glob;
 mod init;
 mod installer;
 mod knowledge;
@@ -181,6 +182,14 @@ fn ls(repo_root: &Path) -> Result<()> {
         return Ok(());
     }
 
+    let fmt_glob = |hook: &config::Hook| -> String {
+        hook.glob
+            .as_ref()
+            .filter(|v| !v.is_empty())
+            .map(|v| v.join(", "))
+            .unwrap_or_else(|| "-".to_string())
+    };
+
     // Compute column widths across all hooks
     let mut w_name = 0usize;
     let mut w_cmd = 0usize;
@@ -189,7 +198,7 @@ fn ls(repo_root: &Path) -> Result<()> {
         for hook in &cfg.hooks {
             w_name = w_name.max(hook.name.len());
             w_cmd = w_cmd.max(hook.cmd.len());
-            w_glob = w_glob.max(hook.glob.as_deref().unwrap_or("-").len());
+            w_glob = w_glob.max(fmt_glob(hook).len());
         }
     }
 
@@ -199,7 +208,7 @@ fn ls(repo_root: &Path) -> Result<()> {
         }
         println!("{}", style::bold(&cfg.path.display().to_string()));
         for hook in &cfg.hooks {
-            let glob = hook.glob.as_deref().unwrap_or("-");
+            let glob = fmt_glob(hook);
             let ht = if hook.hook_type == config::HookType::PreCommit {
                 String::new()
             } else {
@@ -421,15 +430,11 @@ fn stage_outputs(patterns: &[String], files: &mut Vec<String>) {
     let Ok(dirty) = git::dirty_files() else {
         return;
     };
+    let Ok(matcher) = glob::Matcher::new(patterns) else {
+        return;
+    };
 
-    let mut to_stage: Vec<String> = Vec::new();
-    for pattern in patterns {
-        for file in &dirty {
-            if runner::glob_match(pattern, file) {
-                to_stage.push(file.clone());
-            }
-        }
-    }
+    let to_stage: Vec<String> = dirty.into_iter().filter(|f| matcher.is_match(f)).collect();
 
     if to_stage.is_empty() {
         return;
