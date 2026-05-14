@@ -3,6 +3,8 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer};
 use std::path::{Path, PathBuf};
 
+use crate::glob::Matcher;
+
 /// Deserialize either a single string or a list of strings into `Option<Vec<String>>`.
 /// Used so `glob` and `outputs` accept both `"*.rs"` and `["*.rs", "!**/gen/**"]`.
 fn string_or_vec<'de, D>(deserializer: D) -> std::result::Result<Option<Vec<String>>, D::Error>
@@ -82,6 +84,21 @@ pub struct Hook {
     pub glob: Option<Vec<String>>,
     pub hook_type: HookType,
     pub outputs: Option<Vec<String>>,
+    pub glob_matcher: Option<Matcher>,
+}
+
+impl Hook {
+    fn build(name: String, cfg: HookConfig, hook_type: HookType) -> Result<Self> {
+        let glob_matcher = cfg.glob.as_deref().map(Matcher::new).transpose()?;
+        Ok(Self {
+            name,
+            cmd: cfg.cmd,
+            glob: cfg.glob,
+            hook_type,
+            outputs: cfg.outputs,
+            glob_matcher,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -153,7 +170,7 @@ pub fn parse_manifest(repo_root: &Path, manifest_path: &Path) -> Result<Manifest
         _ => anyhow::bail!("unsupported manifest: {filename}"),
     };
 
-    let hooks = hook_map
+    let hooks: Vec<Hook> = hook_map
         .into_iter()
         .map(|(name, cfg)| {
             let hook_type = cfg
@@ -166,15 +183,9 @@ pub fn parse_manifest(repo_root: &Path, manifest_path: &Path) -> Result<Manifest
                     })
                 })
                 .unwrap_or(HookType::PreCommit);
-            Hook {
-                name,
-                cmd: cfg.cmd,
-                glob: cfg.glob,
-                hook_type,
-                outputs: cfg.outputs,
-            }
+            Hook::build(name, cfg, hook_type)
         })
-        .collect();
+        .collect::<Result<_>>()?;
 
     Ok(ManifestConfig {
         path: manifest_path.to_path_buf(),
@@ -218,13 +229,13 @@ pub fn parse_manifest_lenient(repo_root: &Path, manifest_path: &Path) -> Lenient
                         .as_deref()
                         .map(|t| HookType::from_str(t).unwrap_or(HookType::PreCommit))
                         .unwrap_or(HookType::PreCommit);
-                    HookResult::Ok(Hook {
-                        name,
-                        cmd: cfg.cmd,
-                        glob: cfg.glob,
-                        hook_type,
-                        outputs: cfg.outputs,
-                    })
+                    match Hook::build(name.clone(), cfg, hook_type) {
+                        Ok(hook) => HookResult::Ok(hook),
+                        Err(e) => HookResult::Err {
+                            name,
+                            error: e.to_string(),
+                        },
+                    }
                 }
                 Err(e) => HookResult::Err {
                     name,

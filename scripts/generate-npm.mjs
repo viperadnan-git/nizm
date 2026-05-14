@@ -20,10 +20,10 @@ const CONFIG = {
     name: "nizm-cli",
     bin: "nizm",
     scope: "@nizm-cli",
-    description: "Lightweight, zero-config pre-commit hooks",
+    description: "Lightweight, zero-config git hooks",
     license: "MIT",
     repository: "https://github.com/viperadnan-git/nizm",
-    keywords: ["git", "hooks", "pre-commit", "linter", "formatter"],
+    keywords: ["git", "hooks", "git-hooks", "linter", "formatter"],
     installHint: "npm install -g nizm-cli",
     readme: "README.md",
     targets: [

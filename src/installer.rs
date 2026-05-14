@@ -204,7 +204,7 @@ fn generate_block(manifests: &[PathBuf], parallel: bool, hook_type: HookType) ->
          \x20 echo \"nizm: not found in PATH — install it or run: cargo install nizm\" >&2\n\
          \x20 exit 1\n\
          fi\n\
-         nizm run{config_args}{parallel_flag}{type_flag} || exit $?\n\
+         nizm run{config_args}{parallel_flag}{type_flag} -- \"$@\" || exit $?\n\
          {BLOCK_END}"
     )
 }
@@ -270,7 +270,7 @@ fn replace_block(content: &str, new_block: &str) -> Result<String> {
 }
 
 fn write_hook(hook_path: &Path, content: &str) -> Result<()> {
-    std::fs::write(hook_path, content).context("failed to write pre-commit hook")?;
+    std::fs::write(hook_path, content).context("failed to write git hook")?;
     #[cfg(unix)]
     {
         let mut perms = std::fs::metadata(hook_path)?.permissions();

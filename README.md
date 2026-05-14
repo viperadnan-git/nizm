@@ -6,7 +6,7 @@
 
 <h1>nizm</h1>
 
-**Lightweight, zero-config pre-commit hooks**
+**Lightweight, zero-config git hooks**
 
 [![Crates.io][crate-badge]][crate-url]
 [![npm][npm-badge]][npm-url]
@@ -17,7 +17,7 @@
 
 </div>
 
-**nizm** (from Arabic _nizam_ — system/order) is a fast, native CLI that runs your formatters and linters at the git pre-commit stage. It reads hook definitions straight from your existing project manifests — no `.yaml` files, no managed environments. Unlike `pre-commit`, nizm doesn't install tools for you; it trusts the ones already in your dev-dependencies and local `PATH`.
+**nizm** (from Arabic _nizam_ — system/order) is a fast, native CLI that runs your formatters, linters, and message checks at every git hook stage — `pre-commit`, `commit-msg`, `prepare-commit-msg`, and `pre-push`. It reads hook definitions straight from your existing project manifests — no `.yaml` files, no managed environments. Unlike `pre-commit`, nizm doesn't install tools for you; it trusts the ones already in your dev-dependencies and local `PATH`.
 
 ```console
 $ nizm run
@@ -84,7 +84,7 @@ nizm discovers hooks from your project manifests. No separate config file needed
 
 ```toml
 [tool.nizm.hooks]
-ruff  = { cmd = "ruff check --fix {staged_files}", glob = "*.py" }
+ruff  = { cmd = "ruff check --fix {staged_files}",  glob = "*.py" }
 black = { cmd = "black {staged_files}",             glob = "*.py" }
 mypy  = { cmd = "mypy {staged_files}",              glob = "*.py" }
 ```
@@ -135,6 +135,31 @@ test  = { cmd = "make test" }
 > [!TIP]
 > If `{staged_files}` is omitted, the command runs unconditionally when any file in scope is staged.
 
+### Command placeholders
+
+Inside `cmd`, the following tokens are substituted before the shell runs the command:
+
+| Placeholder      | Expands to                                                                |
+| :--------------- | :------------------------------------------------------------------------ |
+| `{staged_files}` | Space-separated list of scoped staged files (shell-escaped).              |
+| `{1}`, `{2}`, …  | Positional arguments forwarded from git (1-based, shell-escaped).         |
+
+The positional args mirror what git passes to its hook script. Out-of-range references expand to an empty string. Unknown `{name}` tokens are left untouched.
+
+| Hook type            | `{1}`                  | `{2}`     | `{3}` |
+| :------------------- | :--------------------- | :-------- | :---- |
+| `pre-commit`         | _(none)_               | _(none)_  | _(none)_ |
+| `commit-msg`         | path to message file   | _(none)_  | _(none)_ |
+| `prepare-commit-msg` | path to message file   | source    | sha   |
+| `pre-push`           | remote name            | remote url | _(none)_ |
+
+```toml
+[tool.nizm.hooks]
+ruff       = { cmd = "ruff check {staged_files}", glob = "*.py" }
+commitlint = { cmd = "commitlint --edit {1}", type = "commit-msg" }
+audit      = { cmd = "trivy fs --remote {1} .", type = "pre-push" }
+```
+
 ### Glob syntax
 
 `glob` and `outputs` accept either a single pattern string or a list of patterns:
@@ -163,9 +188,19 @@ Excludes always win: if any `!` pattern matches, the file is filtered out regard
 
 ## Commands
 
+| Command                       | What it does                                            |
+| :---------------------------- | :------------------------------------------------------ |
+| [`nizm init`](#nizm-init)         | Detect dev-deps and inject hook config                  |
+| [`nizm install`](#nizm-install)   | Bake the git hook script into `.git/hooks/`             |
+| [`nizm run`](#nizm-run)           | Execute hooks (what the git hook calls)                 |
+| [`nizm ls`](#nizm-ls)             | Print configured hooks                                  |
+| [`nizm doctor`](#nizm-doctor)     | Diagnose hook health                                    |
+| [`nizm recover`](#nizm-recover)   | Restore working tree from rescue snapshot               |
+| [`nizm uninstall`](#nizm-uninstall) | Remove hook scripts (and optionally config)           |
+
 ### `nizm init`
 
-Scans dev-dependencies, suggests hooks, and injects them into your manifest.
+Scans dev-dependencies, suggests hooks, and injects them into your manifest. Pass hook names as arguments to skip the interactive picker (`nizm init ruff prettier`).
 
 ```console
 $ nizm init
@@ -176,16 +211,22 @@ $ nizm init
 pre-commit hook installed
 ```
 
-Pass hook names directly for non-interactive use: `nizm init ruff prettier`
-
 **Known tools:** `ruff` · `black` · `mypy` · `prettier` · `eslint` · `biome` · `rustfmt` · `clippy`
 
 > [!TIP]
 > For Rust projects, `rustfmt` and `clippy` are suggested automatically when a `[package]` section exists — no dev-dependency needed.
 
+---
+
 ### `nizm install`
 
-Writes a git hook into `.git/hooks/` that calls `nizm run`. Existing hooks are preserved.
+Writes a git hook script into `.git/hooks/` that calls `nizm run`. Existing non-nizm hooks are preserved.
+
+| Flag              | Description                                                  |
+| :---------------- | :----------------------------------------------------------- |
+| `--config <PATH>` | Bake a specific manifest path (repeatable, skips the picker) |
+| `--parallel`      | Bake the `--parallel` flag into the hook script              |
+| `--force`         | Overwrite a modified nizm block without prompting            |
 
 ```console
 $ nizm install
@@ -194,15 +235,18 @@ scanning for manifests...
 pre-commit hook installed
 ```
 
-| Flag | Description |
-| :--- | :---------- |
-| `--config <path>` | Bake specific manifests (repeatable, skips interactive picker) |
-| `--parallel` | Bake `--parallel` flag into the hook script |
-| `--force` | Overwrite modified nizm blocks without prompting |
+---
 
 ### `nizm run`
 
-Runs hooks against staged files. This is what the git hook calls.
+Executes hooks against staged files. Called by the git hook script — you usually don't run this directly. Pass `HOOK` to run a single hook by name; pass `-- ARGS...` to forward positional args to `{1}`, `{2}`, … in `cmd`.
+
+| Flag                 | Description                                              |
+| :------------------- | :------------------------------------------------------- |
+| `--config <PATH>`    | Explicit manifest paths (repeatable, skips auto-discovery) |
+| `--hook-type <TYPE>` | Hook type to run (default: `pre-commit`)                 |
+| `--parallel`         | Run manifests concurrently                               |
+| `--all`              | Run against all tracked files instead of staged          |
 
 ```console
 $ nizm run
@@ -212,17 +256,24 @@ nizm: running against 5 staged files
 nizm: done in 991ms
 ```
 
-| Flag | Description |
-| :--- | :---------- |
-| `HOOK` | Run a single hook by name |
-| `--config <path>` | Explicit manifest paths (repeatable, skips auto-discovery) |
-| `--parallel` | Run manifests concurrently |
-| `--all` | Run against all tracked files instead of staged |
-| `--hook-type <TYPE>` | Hook type to run (default: `pre-commit`) |
+---
+
+### `nizm ls`
+
+Prints every configured hook across all discovered manifests.
+
+```console
+$ nizm ls
+Cargo.toml
+  clippy   cargo clippy --fix --allow-dirty -- -D warnings  *.rs
+  rustfmt  cargo fmt                                        *.rs
+```
+
+---
 
 ### `nizm doctor`
 
-Diagnoses hook health — checks hook files, config validity, and tool availability.
+Diagnoses hook health — checks hook scripts, config validity, and tool availability.
 
 ```console
 $ nizm doctor
@@ -235,31 +286,30 @@ hooks
 all 4 checks passed
 ```
 
-### `nizm ls`
+Exits non-zero if any check fails — safe to wire into CI.
 
-Lists all configured hooks across discovered manifests.
-
-```console
-$ nizm ls
-Cargo.toml
-  clippy   cargo clippy --fix --allow-dirty -- -D warnings  *.rs
-  rustfmt  cargo fmt                                        *.rs
-```
+---
 
 ### `nizm recover`
 
-Restores your working tree from a rescue snapshot after a failed stash recovery.
+Restores your working tree from the rescue snapshot saved before a failed stash operation.
 
 ```console
 $ nizm recover
 working tree restored from rescue snapshot
 ```
 
-If recovery produces conflicts, resolve them manually — the rescue ref is cleaned up automatically.
+If recovery produces conflicts, resolve them manually — the rescue ref (`refs/nizm-backup`) is cleaned up automatically once the restore succeeds.
+
+---
 
 ### `nizm uninstall`
 
-Removes nizm hook blocks from `.git/hooks/`. Use `--purge` to also strip hook config from manifests.
+Removes nizm-managed blocks from `.git/hooks/` scripts.
+
+| Flag      | Description                                          |
+| :-------- | :--------------------------------------------------- |
+| `--purge` | Also strip `[tool.nizm.hooks]` blocks from manifests |
 
 ```console
 $ nizm uninstall --purge
@@ -267,12 +317,14 @@ pre-commit hook removed
   cleaned Cargo.toml
 ```
 
+---
+
 ### Environment variables
 
-| Variable    | Description                                          |
-| :---------- | :--------------------------------------------------- |
-| `NIZM_SKIP` | Comma-separated hook names to skip (e.g. `mypy,ruff`) |
-| `NO_COLOR`  | Disable colored output when set                      |
+| Variable    | Description                                              |
+| :---------- | :------------------------------------------------------- |
+| `NIZM_SKIP` | Comma-separated hook names to skip (e.g. `mypy,ruff`)    |
+| `NO_COLOR`  | Disable colored output when set to any non-empty value   |
 
 ## How It Works
 

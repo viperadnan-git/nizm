@@ -17,6 +17,7 @@ const MATCH_OPTS: MatchOptions = MatchOptions {
 ///
 /// Negation semantics: any matching exclude removes the file regardless of
 /// include order. If includes are present, a file must match at least one.
+#[derive(Debug)]
 pub struct Matcher {
     includes: Vec<Pattern>,
     excludes: Vec<Pattern>,
@@ -74,7 +75,7 @@ fn normalize(pattern: &str) -> String {
 
 /// Expand `{a,b,c}` alternations into a list of patterns. Supports nesting.
 fn expand_braces(pattern: &str) -> Vec<String> {
-    let Some(open) = find_open_brace(pattern) else {
+    let Some(open) = pattern.find('{') else {
         return vec![pattern.to_string()];
     };
     let Some(close) = find_matching_close(pattern, open) else {
@@ -89,10 +90,6 @@ fn expand_braces(pattern: &str) -> Vec<String> {
         out.extend(expand_braces(&combined));
     }
     out
-}
-
-fn find_open_brace(s: &str) -> Option<usize> {
-    s.char_indices().find(|(_, c)| *c == '{').map(|(i, _)| i)
 }
 
 fn find_matching_close(s: &str, open: usize) -> Option<usize> {

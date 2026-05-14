@@ -19,11 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 #[derive(Parser)]
-#[command(
-    name = "nizm",
-    version,
-    about = "Lightweight, zero-config pre-commit hooks"
-)]
+#[command(name = "nizm", version, about = "Lightweight, zero-config git hooks")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -49,25 +45,29 @@ enum Commands {
         #[arg(long)]
         all: bool,
 
-        /// Hook type to run (default: pre-commit)
+        /// Hook type to run
         #[arg(long, default_value = "pre-commit")]
         hook_type: String,
+
+        /// Positional arguments forwarded from git (referenced as {1}, {2}, ...)
+        #[arg(last = true)]
+        hook_args: Vec<String>,
     },
-    /// Install pre-commit hook
+    /// Install git hook scripts for configured hook types
     Install {
-        /// Manifest paths to bake into hook (skips interactive selection)
+        /// Manifest paths to bake into the hook (skips interactive picker)
         #[arg(long)]
         config: Vec<PathBuf>,
 
-        /// Bake --parallel flag into hook script
+        /// Bake --parallel flag into the hook script
         #[arg(long)]
         parallel: bool,
 
-        /// Overwrite existing hook without prompting
+        /// Overwrite a modified nizm block without prompting
         #[arg(long)]
         force: bool,
     },
-    /// Diagnose pre-commit hook health
+    /// Diagnose installed hooks, manifest config, and tool availability
     Doctor,
     /// Scan dev-dependencies and suggest hooks
     Init {
@@ -83,7 +83,7 @@ enum Commands {
         #[arg(long)]
         purge: bool,
     },
-    /// Restore working tree from a failed stash recovery
+    /// Restore working tree from rescue snapshot left by a failed stash
     Recover,
 }
 
@@ -108,10 +108,11 @@ fn try_main() -> Result<ExitCode> {
             parallel,
             all,
             hook_type,
+            hook_args,
         } => {
             let ht = config::HookType::from_str(&hook_type)
                 .ok_or_else(|| anyhow::anyhow!("unknown hook type: {hook_type}"))?;
-            run(repo_root, config, hook, parallel, all, ht)
+            run(repo_root, config, hook, parallel, all, ht, hook_args)
         }
         Commands::Install {
             config,
@@ -231,6 +232,7 @@ fn run(
     parallel: bool,
     all: bool,
     hook_type: config::HookType,
+    hook_args: Vec<String>,
 ) -> Result<ExitCode> {
     let configs: Vec<_> = if config_paths.is_empty() {
         parse_manifests_warn(&repo_root, &config::discover_manifests(&repo_root)?)
@@ -304,9 +306,21 @@ fn run(
 
     let mut files = files;
     let failed = if parallel && prepared.len() > 1 {
-        run_parallel(&prepared, &files, hook_filter.as_deref(), &skip_set)
+        run_parallel(
+            &prepared,
+            &files,
+            hook_filter.as_deref(),
+            &skip_set,
+            &hook_args,
+        )
     } else {
-        run_sequential(&prepared, &mut files, hook_filter.as_deref(), &skip_set)
+        run_sequential(
+            &prepared,
+            &mut files,
+            hook_filter.as_deref(),
+            &skip_set,
+            &hook_args,
+        )
     };
 
     println!(
@@ -354,6 +368,7 @@ fn run_sequential(
     files: &mut Vec<String>,
     hook_filter: Option<&str>,
     skip_set: &HashSet<String>,
+    hook_args: &[String],
 ) -> bool {
     let mut failed = false;
     'hooks: for (manifest, manifest_dir, abs_cwd) in prepared {
@@ -378,7 +393,7 @@ fn run_sequential(
                 continue;
             }
 
-            match runner::exec_hook(hook, files, manifest_dir, abs_cwd) {
+            match runner::exec_hook(hook, files, manifest_dir, abs_cwd, hook_args) {
                 Ok((code, elapsed, count)) if code != 0 => {
                     eprintln!(
                         "  {} {} {}",
@@ -475,6 +490,7 @@ fn run_parallel(
     files: &[String],
     hook_filter: Option<&str>,
     skip_set: &HashSet<String>,
+    hook_args: &[String],
 ) -> bool {
     let any_failed = AtomicBool::new(false);
 
@@ -513,7 +529,13 @@ fn run_parallel(
                             continue;
                         }
 
-                        match runner::exec_hook_captured(hook, files, manifest_dir, abs_cwd) {
+                        match runner::exec_hook_captured(
+                            hook,
+                            files,
+                            manifest_dir,
+                            abs_cwd,
+                            hook_args,
+                        ) {
                             Ok((code, elapsed, count, stdout, stderr)) => {
                                 if code != 0 {
                                     any_failed.store(true, Ordering::Relaxed);
